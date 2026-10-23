@@ -24,6 +24,13 @@ function formatPrice(value?: string | null): string {
   return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(parsed);
 }
 
+function formatBalance(value?: string | null): string {
+  if (!value) return "—";
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(parsed);
+}
+
 function shortAddress(value: string): string {
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
@@ -146,7 +153,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
         {riskLoading && <p role="status">Checking Strike account data…</p>}
         {riskError && <p className="inline-error" role="alert">{riskError}</p>}
         {!account && <p>Connect to view your balance and positions.</p>}
-        {risk && <><div className="balance-row"><span>Available balance</span><strong>{risk.account.available_balance}</strong></div>
+        {risk && <><div className="balance-row"><span>Available balance</span><strong>{formatBalance(risk.account.available_balance)}</strong></div>
           <h3>Open positions</h3>{risk.positions.length === 0 ? <p>No open positions.</p> : <ul className="position-list">{risk.positions.map((position, index) => <li key={`${position.symbol}-${index}`}><strong>{position.symbol}</strong><span>Size {position.size}</span><span>{position.leverage}x · {position.marginMode}</span></li>)}</ul>}
           <p className="modal-note">Leverage: {risk.account.symbolSettings?.["BTC-USD"]?.leverage !== undefined ? `${risk.account.symbolSettings["BTC-USD"].leverage}x` : "Unavailable"}. Toruni requires 1x to play.</p></>}
         {account && <button className="button button--ghost button--wide" onClick={onRiskRefresh} disabled={riskLoading}>Refresh account and positions</button>}
@@ -156,8 +163,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
         {stage === "connected" && address && <div className="connected-summary">
           <StatusPill state="live">CONNECTED</StatusPill>
           <p className="wallet-address"><Icon name="wallet" size={17} />{shortAddress(address)}</p>
-          {account ? <div className="balance-row"><span>Available balance</span><strong>{account.available_balance}</strong></div> : <p className="inline-error" role="status"><Icon name="alert" size={17} />Your wallet is authorized, but the balance is unavailable. Check again shortly.</p>}
-          <p className="modal-note">Keep this tab open. Your balance must be confirmed before you can join.</p>
+          {account ? <div className="balance-row"><span>Available balance</span><strong>{formatBalance(account.available_balance)}</strong></div> : <p className="inline-error" role="status"><Icon name="alert" size={17} />Your wallet is authorized, but the balance is unavailable. Check again shortly.</p>}
           {error && <p className="inline-error" role="status">{error}</p>}
           {stage === "connected" && account && <button className="button button--ghost button--wide" onClick={onRiskRefresh} disabled={riskLoading}>
             {riskLoading ? "Refreshing account…" : "Refresh balance and positions"}
@@ -444,7 +450,7 @@ export function App() {
     : !liveAccount
       ? "Connect your wallet first."
       : !policyReady
-        ? "The challenge limits are still being prepared. You can explore the market meanwhile."
+        ? "Challenges are unavailable right now. You can still explore the market."
         : !riskFresh
           ? "Refresh your Strike balance and positions before joining."
           : risk?.account.symbolSettings?.["BTC-USD"]?.leverage !== 1
@@ -466,7 +472,7 @@ export function App() {
     : !liveAccount
       ? "Connect your wallet first."
       : !policyReady
-        ? "Challenge limits are not ready yet."
+        ? "Offers are unavailable right now."
         : currentMarketState !== "live"
           ? "Market data is unavailable."
         : !participantJoined
