@@ -28,3 +28,7 @@
 /playwright-report/
 /test-results/
 /screenshots/
+
+# Project-private identity and handoff notes
+/CONTEXT.md
+/DESIGN.md

@@ -1,3 +1,4 @@
+import { parseDecimal, alignDecimals, compareDecimals, subtractDecimals, multiplyDecimals, type DecimalValue } from "./decimal.ts";
 import type {
   QuoteAssessment,
   QuoteSide,
@@ -5,54 +6,16 @@ import type {
   ScoreSample,
   StrikeMark,
   VerifiedQuote,
-} from "./contracts";
+} from "./contracts.ts";
 
 const SCORE_SCALE = 1_000_000_000_000n;
 const SCORE_SCALE_DIGITS = 12;
 const SCORE_BAND_BPS = 50n;
 const BPS = 10_000n;
 
-interface DecimalValue {
-  coefficient: bigint;
-  scale: number;
-}
-
-function parseDecimal(value: string): DecimalValue | null {
-  if (!/^-?\d+(?:\.\d+)?$/.test(value)) return null;
-  const negative = value.startsWith("-");
-  const unsigned = negative ? value.slice(1) : value;
-  const [whole = "0", fraction = ""] = unsigned.split(".");
-  const coefficient = BigInt(`${whole}${fraction}` || "0");
-  return { coefficient: negative ? -coefficient : coefficient, scale: fraction.length };
-}
-
-function alignDecimals(a: DecimalValue, b: DecimalValue): [bigint, bigint, number] {
-  const scale = Math.max(a.scale, b.scale);
-  const factorA = 10n ** BigInt(scale - a.scale);
-  const factorB = 10n ** BigInt(scale - b.scale);
-  return [a.coefficient * factorA, b.coefficient * factorB, scale];
-}
-
-function compareDecimals(a: DecimalValue, b: DecimalValue): number {
-  const [left, right] = alignDecimals(a, b);
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
 function isFresh(observedAt: number, nowMs: number, maximumAgeMs: number): boolean {
   const age = nowMs - observedAt;
   return age >= 0 && age <= maximumAgeMs;
-}
-
-function subtractDecimals(a: DecimalValue, b: DecimalValue): DecimalValue {
-  const [left, right, scale] = alignDecimals(a, b);
-  return { coefficient: left - right, scale };
-}
-
-function multiplyDecimals(a: DecimalValue, b: DecimalValue): DecimalValue {
-  return {
-    coefficient: a.coefficient * b.coefficient,
-    scale: a.scale + b.scale,
-  };
 }
 
 function quoteSide(quote: VerifiedQuote): QuoteSide {
@@ -103,6 +66,8 @@ export function assessVerifiedQuote(
   if (!size || !filled || !price || !markPrice || !minimum || !maximum || !exposure || !exposureLimit) {
     return assessFailure(side, "invalid-size-or-price");
   }
+  if (minimum.coefficient <= 0n || maximum.coefficient <= 0n || exposureLimit.coefficient < 0n
+    || compareDecimals(maximum, minimum) < 0) return assessFailure(side, "invalid-size-or-price");
 
   const remaining = subtractDecimals(size, filled);
   if (remaining.coefficient <= 0n || filled.coefficient < 0n || price.coefficient <= 0n || markPrice.coefficient <= 0n) {
@@ -118,7 +83,8 @@ export function assessVerifiedQuote(
   if (!isFresh(quote.lastVerifiedAt, nowMs, policy.orderFreshnessLimitMs)) {
     return assessFailure(side, "order-stale");
   }
-  if (nowMs - quote.firstOpenObservedAt < policy.minimumDwellMs) {
+  if (!Number.isFinite(quote.firstOpenObservedAt) || quote.firstOpenObservedAt <= 0
+    || quote.firstOpenObservedAt > quote.lastVerifiedAt || nowMs - quote.firstOpenObservedAt < policy.minimumDwellMs) {
     return assessFailure(side, "dwell-incomplete");
   }
 

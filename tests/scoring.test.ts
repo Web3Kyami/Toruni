@@ -25,7 +25,7 @@ const policy: ScorePolicy = {
 
 function quote(overrides: Partial<VerifiedQuote> = {}): VerifiedQuote {
   return {
-    accountId: "account-test-fixture",
+    exchangeOrderId: "12345", accountId: "account-test-fixture",
     clientOrderId: "toruni-test-fixture",
     symbol: "BTC-USD",
     side: "buy",

@@ -1,4 +1,4 @@
-import type { MarketSnapshot, StrikePublicAccount } from "../../shared/contracts";
+import type { MarketSnapshot, StrikePublicAccount, StrikePosition } from "../../shared/contracts";
 
 export type PublicStrikeAccount = StrikePublicAccount;
 
@@ -25,4 +25,9 @@ export function readMarketSnapshot(symbol = "BTC-USD"): Promise<MarketSnapshot> 
 
 export function readPublicStrikeAccount(address: string): Promise<PublicStrikeAccount> {
   return readJson<PublicStrikeAccount>(`/api/account?blockchain_address=${encodeURIComponent(address)}`);
+}
+
+export interface RiskSnapshot { account: StrikePublicAccount; positions: StrikePosition[]; observedAt: number }
+export function readRiskSnapshot(accountId: string): Promise<RiskSnapshot> {
+  return readJson<RiskSnapshot>(`/api/risk?account_id=${encodeURIComponent(accountId)}`);
 }

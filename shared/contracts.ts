@@ -41,8 +41,24 @@ export interface MarketSnapshot {
   checkedAt: number;
   mark: StrikeMark | null;
   depth: StrikeDepth | null;
-  marketRules: unknown | null;
+  marketRules: StrikeMarketRules | null;
   unavailableSources: Array<"mark" | "depth" | "marketRules">;
+}
+
+export interface StrikeMarketRules {
+  symbol: string;
+  status: string;
+  reduceOnly: boolean;
+  tickPrice: string;
+  minimumPrice: string;
+  maximumPrice: string;
+  limitStepSize: string;
+  minimumLimitSize: string;
+  maximumLimitSize: string;
+  minimumNotional: string;
+  limitPriceBound: string;
+  observedAt: number;
+  source: "strike-v2-testnet";
 }
 
 export interface StrikePublicAccount {
@@ -52,9 +68,19 @@ export interface StrikePublicAccount {
   wallet_balance: string;
   available_balance: string;
   margin_balance: string;
+  symbolSettings: Record<string, { leverage: number; marginMode: "cross" | "isolated"; allowPreTrade: boolean }> | null;
+  observedAt: number;
+}
+
+export interface StrikePosition {
+  symbol: string;
+  size: string;
+  leverage: number;
+  marginMode: "cross" | "isolated";
 }
 
 export interface VerifiedQuote {
+  exchangeOrderId: string;
   accountId: string;
   clientOrderId: string;
   symbol: string;

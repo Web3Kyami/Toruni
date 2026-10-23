@@ -2,6 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_BUILDER_CODE?: string;
+  readonly VITE_BUILDER_FEE_BPS?: string;
 }
 
 interface ImportMeta {
