@@ -40,6 +40,10 @@ The service serves `dist/` and the API on port 4174 by default. Configure `APP_O
 
 ## Architecture
 
+The Vercel deployment serves the interface and the existing HTTP API through `api/[...path].ts`. Set `VITE_BUILDER_CODE`, `VITE_BUILDER_FEE_BPS`, and the server-only `DATABASE_URL` in the project environment. Sessions use the deployment's `VERCEL_URL` as their trusted origin unless `APP_ORIGIN` is configured for a custom domain. Client routes support direct navigation and refresh.
+
+The scoring worker runs through `npm run start:server` on a persistent Node host sharing the same database. It is not started inside Vercel request handlers. Vercel clients poll persisted observations; the persistent Node service retains its event stream. Keep round entry closed until the worker and the approved risk limits are configured.
+
 - `src/`: React interface, Builder Connect, browser-only Ed25519 signing, and testnet order adapters.
 - `server/`: secure sessions, independent Strike reads, round lifecycle, a database-held scoring leader, server-sent updates, and report APIs.
 - `shared/`: typed contracts, exact decimal validation, fixed-point scoring, and deterministic ledger replay.

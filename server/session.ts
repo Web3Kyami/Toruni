@@ -6,7 +6,8 @@ const production = process.env.NODE_ENV === "production";
 const secureCookies = production || process.env.APP_ORIGIN?.startsWith("https://") === true;
 const cookieName = secureCookies ? "__Host-toruni" : "toruni_local";
 const lifetimeMs = 24 * 60 * 60 * 1000;
-const appOrigin = process.env.APP_ORIGIN ?? (production ? "" : "http://localhost:5173");
+const appOrigin = process.env.APP_ORIGIN
+  ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : production ? "" : "http://localhost:5173");
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 export function requestHasTrustedOrigin(request: IncomingMessage): boolean {

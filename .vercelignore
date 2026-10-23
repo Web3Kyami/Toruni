@@ -1,0 +1,15 @@
+.git
+.toruni
+.codex
+.codex-attachments
+.env
+.env.*
+node_modules
+dist
+build
+coverage
+screenshots
+test-results
+playwright-report
+*.md
+*.mdx
