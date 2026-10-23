@@ -21,7 +21,7 @@ export async function runPostgresChecks() {
       for (const session of [sessionHash, otherSession]) await client.query(`INSERT INTO app_sessions
         (session_hash,csrf_hash,created_at,expires_at) VALUES ($1,$1,$2,$3)`, [session, new Date(now), new Date(now + 3_600_000)]);
       const admission: IndependentAdmission = { accountId, observedAt: now, availableCollateral: "1000",
-        requiredCollateral: "200", effectiveLeverage: 1, provenance: "strike-independent-read" };
+        requiredCollateral: "200", absoluteExposure: "0", effectiveLeverage: 1, provenance: "strike-independent-read" };
       const rules = { symbol: "BTC-USD" as const, minimumRemainingNotional: "100", maximumQuoteNotional: "200", maximumAccountExposure: "200" };
       const participant = await enrollParticipant(client, sessionHash, admission, rules, now);
       roundId = participant.roundId;
@@ -34,9 +34,10 @@ export async function runPostgresChecks() {
       await client.query("UPDATE rounds SET status='active' WHERE id=$1", [roundId]);
       await assert.rejects(issueQuoteIntent(client, sessionHash, "buy", now), /active round/); checks++;
       const at = now + 16_000;
-      const intent = await issueQuoteIntent(client, sessionHash, "buy", at);
+      const risk = { availableBalance: "1000", currentAbsoluteExposure: "0", requestedNotional: "100.245", maximumAccountExposure: "200", price: "81500", size: "0.00123" };
+      const intent = await issueQuoteIntent(client, sessionHash, "buy", at, risk);
       assert.match(intent.clientOrderId, /^trn[0-9a-f]{32}$/); checks++;
-      await assert.rejects(issueQuoteIntent(client, sessionHash, "buy", at), /existing quote/); checks++;
+      await assert.rejects(issueQuoteIntent(client, sessionHash, "buy", at, risk), /existing quote/); checks++;
       await assert.rejects(issueQuoteIntent(client, otherSession, "buy", at), /active round/); checks++;
       const quote: VerifiedQuote = { exchangeOrderId: "12345", accountId, clientOrderId: intent.clientOrderId,
         symbol: "BTC-USD", side: "buy", status: "pending", type: "limit", timeInForce: "GTC", postOnly: true,
@@ -47,6 +48,7 @@ export async function runPostgresChecks() {
       assert.equal(pending.rows[0].account_id, null); assert.equal(pending.rows[0].verification_state, "unverified"); checks++;
       await assert.rejects(recordOrderObservation(client, { ...quote, accountId: randomUUID() }), /does not match/); checks++;
       await assert.rejects(recordOrderObservation(client, { ...quote, clientOrderId: `trn${randomUUID().replaceAll('-', '')}` }), /does not match/); checks++;
+      await assert.rejects(recordOrderObservation(client, { ...quote, size: "100" }), /terms do not match/); checks++;
       const open = { ...quote, status: "open" as const, firstOpenObservedAt: at + 2000, lastVerifiedAt: at + 2000 };
       await recordOrderObservation(client, open);
       const bound = await client.query("SELECT account_id,verification_state FROM participants WHERE id=$1", [participant.participantId]);
@@ -66,7 +68,7 @@ export async function runPostgresChecks() {
       assert.equal((await client.query("SELECT count(*)::int AS count FROM round_results WHERE round_id=$1", [roundId])).rows[0].count, 0); checks++;
       await recordOrderObservation(client, { ...quote, status: "canceled", lastVerifiedAt: at + 11000 });
       await assert.rejects(recordOrderObservation(client, { ...open, lastVerifiedAt: at + 12000 }), /older than/); checks++;
-      const next = await issueQuoteIntent(client, sessionHash, "buy", at + 12000);
+      const next = await issueQuoteIntent(client, sessionHash, "buy", at + 12000, risk);
       assert.notEqual(next.clientOrderId, intent.clientOrderId); checks++;
       await assert.rejects(issueQuoteIntent(client, sessionHash, "sell", now + 195_000), /active round/); checks++;
       await client.query("UPDATE rounds SET status='settling' WHERE id=$1", [roundId]);

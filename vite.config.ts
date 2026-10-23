@@ -5,6 +5,8 @@ export default defineConfig(({ mode }) => {
   const local = loadEnv(mode, process.cwd(), "");
   if (!process.env.DATABASE_URL && local.DATABASE_URL) process.env.DATABASE_URL = local.DATABASE_URL;
   if (!process.env.APP_ORIGIN && local.APP_ORIGIN) process.env.APP_ORIGIN = local.APP_ORIGIN;
+  if (!process.env.TORUNI_MAX_QUOTE_NOTIONAL && local.TORUNI_MAX_QUOTE_NOTIONAL) process.env.TORUNI_MAX_QUOTE_NOTIONAL = local.TORUNI_MAX_QUOTE_NOTIONAL;
+  if (!process.env.TORUNI_MAX_ACCOUNT_EXPOSURE && local.TORUNI_MAX_ACCOUNT_EXPOSURE) process.env.TORUNI_MAX_ACCOUNT_EXPOSURE = local.TORUNI_MAX_ACCOUNT_EXPOSURE;
   if (local.TORUNI_READ_ONLY_ACCOUNT_PROBES) process.env.TORUNI_READ_ONLY_ACCOUNT_PROBES = local.TORUNI_READ_ONLY_ACCOUNT_PROBES;
   return {
   plugins: [react(), {

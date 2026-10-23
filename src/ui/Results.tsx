@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { readRoundAudit, readRoundReport, RoundNotFoundError, type AuditSample, type RoundReport } from "../api/rounds";
+import type { ObservedOrder } from "../api/useRoundData";
 
-export function Results({ roundId, onBack, onRules }: { roundId: string; onBack: () => void; onRules: () => void }) {
+export function Results({ roundId, onBack, onRules, myOrders = [], canCancel = false, cancelingOrderIds = new Set(), onCancel }: {
+  roundId: string; onBack: () => void; onRules: () => void; myOrders?: ObservedOrder[]; canCancel?: boolean;
+  cancelingOrderIds?: Set<string>; onCancel?: (clientOrderId: string) => void;
+}) {
   const [report, setReport] = useState<RoundReport | null>(null);
   const [error, setError] = useState("");
   const [missing, setMissing] = useState(false);
@@ -42,7 +46,13 @@ export function Results({ roundId, onBack, onRules }: { roundId: string; onBack:
       </div>}
       <section className={`panel cleanup-panel ${unresolved ? "cleanup-panel--warning" : ""}`}><h2>{unresolved ? "Review remaining orders" : "Order cleanup"}</h2><p>{unresolved ? "One or more game orders may still be open. Inspect the latest Strike status before taking action." : report.participants.length ? "All offers from this round are closed." : "Cleanup has not been finalized."}</p><p>Canceling an order does not close a filled position.</p></section>
       <section className="panel results-orders"><div className="panel-heading"><h2>Round orders</h2><button className="text-button" onClick={() => void inspectAudit()}>View score history</button></div>
-        {report.orders.length === 0 ? <p className="results-empty-copy">No confirmed offers for this round.</p> : <div className="results-table-wrap"><table><thead><tr><th>Side</th><th>Price</th><th>Size</th><th>Filled size</th><th>Strike status</th><th>Order reference</th></tr></thead><tbody>{report.orders.map(order => <tr key={order.client_order_id}><td>{order.side}</td><td>{order.price}</td><td>{order.original_qty}</td><td>{order.filled_qty}</td><td>{order.exchange_status}</td><td><code>{order.exchange_order_id || order.client_order_id}</code></td></tr>)}</tbody></table></div>}
+        {report.orders.length === 0 ? <p className="results-empty-copy">No confirmed offers for this round.</p> : <div className="results-table-wrap"><table><thead><tr><th>Side</th><th>Price</th><th>Size</th><th>Filled size</th><th>Strike status</th><th>Order reference</th><th>Action</th></tr></thead><tbody>{report.orders.map(order => {
+          const ownOrder = myOrders.find(item => item.client_order_id === order.client_order_id);
+          const canRequestCancel = canCancel && ownOrder?.exchange_status === "open" && Boolean(ownOrder.exchange_order_id);
+          const cancelRequested = cancelingOrderIds.has(order.client_order_id);
+          return <tr key={order.client_order_id}><td>{order.side === "buy" ? "Bid" : "Ask"}</td><td>{order.price}</td><td>{order.original_qty}</td><td>{order.filled_qty}</td><td>{resultOrderStatus(order.exchange_status)}</td><td><code>{order.exchange_order_id || order.client_order_id}</code></td>
+            <td>{canRequestCancel ? <button className="text-button" onClick={() => onCancel?.(order.client_order_id)} disabled={cancelRequested}>{cancelRequested ? "Cancellation requested" : "Request cancellation"}</button> : "—"}</td></tr>;
+        })}</tbody></table></div>}
       </section>
       {auditOpen && <section className="panel audit-section"><div className="panel-heading"><h2>Score history</h2><button className="text-button" onClick={() => setAuditOpen(false)}>Close evidence</button></div>{auditLoading && <p role="status">Loading score history…</p>}{auditError && <p role="alert">{auditError} <button className="text-button" onClick={() => void inspectAudit()}>Try again</button></p>}{audit && <>
         <div className="audit-timeline" aria-label="Score observation timeline">{audit.length === 0 ? <p>No score history yet.</p> : audit.map(sample => <div key={`${sample.participant_id}-${sample.sampled_at}`} className={`audit-tick ${BigInt(sample.delta_scaled) > 0n ? "audit-tick--earned" : ""}`} title={`${new Date(sample.sampled_at).toLocaleTimeString()} · ${BigInt(sample.delta_scaled) > 0n ? "Points earned" : "No points earned"}`}><span className="sr-only">{sample.sampled_at}: {BigInt(sample.delta_scaled) > 0n ? "Points earned" : "No points earned"}</span></div>)}</div>
@@ -50,6 +60,18 @@ export function Results({ roundId, onBack, onRules }: { roundId: string; onBack:
       <div className="results-actions"><button className="button button--primary" onClick={onBack}>Back to lobby</button><button className="button button--ghost" onClick={onRules}>Review scoring rules</button></div>
     </>}
   </section>;
+}
+
+function resultOrderStatus(status: string): string {
+  switch (status.toLowerCase()) {
+    case "open": return "Resting on Strike";
+    case "pending": return "Waiting for Strike";
+    case "filled": return "Filled";
+    case "canceled": return "Canceled";
+    case "expired": return "Expired";
+    case "rejected": return "Not accepted";
+    default: return "Not confirmed";
+  }
 }
 
 function qualityPercent(value: string): string { const parsed = Number(value); return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1e12 ? `${Math.round(parsed / 1e10)}%` : "Unavailable"; }

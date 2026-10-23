@@ -19,6 +19,8 @@ Set these values in `.env.local`:
 | `VITE_BUILDER_FEE_BPS` | `0` for this build |
 | `DATABASE_URL` | Server-only PostgreSQL connection string |
 | `APP_ORIGIN` | Exact browser origin, normally `http://localhost:5173` |
+| `TORUNI_MAX_QUOTE_NOTIONAL` | Owner-approved maximum value for one resting quote, in USD |
+| `TORUNI_MAX_ACCOUNT_EXPOSURE` | Owner-approved gross limit for positions and Toruni resting quotes, in USD; must cover two maximum quotes |
 
 ```sh
 npm run migrate
@@ -43,9 +45,9 @@ The service serves `dist/` and the API on port 4174 by default. Configure `APP_O
 - `shared/`: typed contracts, exact decimal validation, fixed-point scoring, and deterministic ledger replay.
 - `sql/`: ordered PostgreSQL migrations with checksum verification.
 
-Only `api-v2-testnet.strikefinance.org` accepts authenticated requests. There is no configurable mainnet endpoint. Builder Connect starts after an explicit user action; the server never receives the private API-wallet key and never places, cancels, or closes trades.
+Only `api-v2-testnet.strikefinance.org` accepts authenticated requests. There is no configurable mainnet endpoint. Builder Connect starts after an explicit user action; the server never receives the private API-wallet key and never places, cancels, or closes trades. The authenticated userstream prompts quick UI refreshes; server-side Strike reads remain authoritative for statuses and scoring.
 
-Order placement is locked until account authorization, credited collateral, risk limits, and independent order-status verification satisfy the trading gate. A successful create response is not proof that an order is open. Canceling an order does not close any position created by a fill.
+Round entry stays closed until both risk limits are set. At 1x, the app uses twice the per-quote cap as a baseline reserve estimate for both offers. Strike fees and positions created by fills may require more; the actual available balance and risk are rechecked before each order. These limits have no default because the blueprint does not approve numeric values. A successful create response is not proof that an order is open. Canceling an order does not close any position created by a fill.
 
 ## Scoring
 

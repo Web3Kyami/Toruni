@@ -1,5 +1,5 @@
 import type { StrikeSide } from "../../shared/contracts";
-import { strikeAuthenticatedFetch } from "./builderConnect";
+import { getCurrentApiSession, strikeAuthenticatedFetch, strikeCancelOrderById } from "./builderConnect";
 
 export interface ServerIssuedOrderIntent {
   clientOrderId: string;
@@ -31,7 +31,7 @@ export async function placePostOnlyLimitOrder(input: PostOnlyLimitInput): Promis
     throw new Error("Order size and price must be positive decimal strings.");
   }
 
-  return strikeAuthenticatedFetch<StrikeCreateOrderResponse>("/v2/order", "POST", {
+  const response = await strikeAuthenticatedFetch<StrikeCreateOrderResponse>("/v2/order", "POST", {
     client_order_id: input.intent.clientOrderId,
     symbol: input.intent.symbol,
     side: input.intent.side,
@@ -41,17 +41,22 @@ export async function placePostOnlyLimitOrder(input: PostOnlyLimitInput): Promis
     time_in_force: "GTC",
     post_only: true,
   });
+  const session = getCurrentApiSession();
+  if (!session || response.account_id !== session.accountId || response.client_order_id !== input.intent.clientOrderId
+    || response.symbol !== input.intent.symbol || !Number.isSafeInteger(response.sequence_id) || response.sequence_id <= 0) {
+    throw new Error("Strike’s response could not be matched to this quote. Toruni is checking its status before you try again.");
+  }
+  return response;
 }
 
 export async function cancelToruniOrder(input: {
-  orderId: number;
+  clientOrderId: string;
+  exchangeOrderId: string;
   symbol: string;
 }): Promise<unknown> {
-  if (!Number.isSafeInteger(input.orderId) || input.orderId <= 0) {
-    throw new Error("A verified Strike order ID is required.");
+  if (!/^trn[0-9a-f]{32}$/.test(input.clientOrderId) || input.symbol !== "BTC-USD"
+    || !/^[1-9]\d{0,18}$/.test(input.exchangeOrderId) || BigInt(input.exchangeOrderId) > 9_223_372_036_854_775_807n) {
+    throw new Error("A verified Toruni order is required.");
   }
-  return strikeAuthenticatedFetch<unknown>("/v2/order/cancel", "DELETE", {
-    order_id: input.orderId,
-    symbol: input.symbol,
-  });
+  return strikeCancelOrderById(input.exchangeOrderId);
 }

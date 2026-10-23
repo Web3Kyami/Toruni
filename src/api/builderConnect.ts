@@ -77,6 +77,41 @@ export function getCurrentApiSession(): Pick<ApiWalletSession, "accountId" | "ad
   };
 }
 
+export async function createUserStreamLogon(
+  privateKey: CryptoKey,
+  publicKey: string,
+  timestamp = Date.now(),
+): Promise<{ method: "session.logon"; params: { apiKey: string; signature: string; timestamp: number }; id: number }> {
+  if (!/^[0-9a-f]{64}$/i.test(publicKey) || !Number.isSafeInteger(timestamp) || timestamp <= 0) {
+    throw new Error("Strike login details could not be checked.");
+  }
+  const message = new TextEncoder().encode(`apiKey=${publicKey}&timestamp=${timestamp}`);
+  const signature = new Uint8Array(await crypto.subtle.sign(
+    { name: "Ed25519" } as AlgorithmIdentifier, privateKey, message,
+  ));
+  return {
+    method: "session.logon",
+    params: {
+      apiKey: publicKey,
+      signature: Array.from(signature, byte => byte.toString(16).padStart(2, "0")).join(""),
+      timestamp,
+    },
+    id: 1,
+  };
+}
+
+export async function signCurrentUserStreamLogon(accountId: string, timestamp = Date.now()): Promise<{
+  method: "session.logon";
+  params: { apiKey: string; signature: string; timestamp: number };
+  id: number;
+}> {
+  const session = currentSession;
+  if (!session || session.accountId !== accountId) throw new Error("Authorize this Strike account before opening its order updates.");
+  const logon = await createUserStreamLogon(session.privateKey, session.publicKey, timestamp);
+  if (currentSession !== session) throw new Error("Wallet access changed. Reconnect before checking order updates.");
+  return logon;
+}
+
 export function isBuilderAuthorizationUncertain(): boolean {
   return authorizationUncertain;
 }
@@ -177,14 +212,14 @@ export async function authorizeBuilderConnect(
   }
 }
 
-async function signedFetch<T>(session: Pick<ApiWalletSession, "publicKey" | "privateKey" | "expiresAt">, path: string, method: string, body?: unknown): Promise<T> {
+async function signedFetch<T>(session: Pick<ApiWalletSession, "publicKey" | "privateKey" | "expiresAt">, path: string, method: string, body?: unknown, exactBody?: string): Promise<T> {
   if (session.expiresAt !== undefined && (!Number.isFinite(session.expiresAt) || Date.now() >= session.expiresAt)) {
     throw new Error("The Strike API wallet has expired. Review its authorization before continuing.");
   }
 
   const url = new URL(path, STRIKE_API_ORIGIN);
   if (url.origin !== STRIKE_API_ORIGIN) throw new Error("Strike requests are restricted to testnet.");
-  const rawBody = method.toUpperCase() === "GET" ? "" : JSON.stringify(body ?? {});
+  const rawBody = method.toUpperCase() === "GET" ? "" : exactBody ?? JSON.stringify(body ?? {});
   if (Date.now() - clockCheckedAt > 30_000) {
     const timeResponse = await fetch(`${STRIKE_API_ORIGIN}/v2/time`, { signal: AbortSignal.timeout(5_000) });
     const time: unknown = await timeResponse.json();
@@ -234,6 +269,19 @@ async function signedFetch<T>(session: Pick<ApiWalletSession, "publicKey" | "pri
 export async function strikeAuthenticatedFetch<T>(path: string, method: string, body?: unknown): Promise<T> {
   if (!currentSession) throw new Error("Authorize Toruni with your wallet first.");
   return signedFetch<T>(currentSession, path, method, body);
+}
+
+export function serializeStrikeCancelBody(orderId: string): string {
+  if (!/^[1-9]\d{0,18}$/.test(orderId) || BigInt(orderId) > 9_223_372_036_854_775_807n) {
+    throw new Error("Strike’s order reference could not be verified.");
+  }
+  return `{"order_id":${orderId},"symbol":"BTC-USD"}`;
+}
+
+export async function strikeCancelOrderById<T>(orderId: string): Promise<T> {
+  if (!currentSession) throw new Error("Authorize Toruni with your wallet first.");
+  const rawBody = serializeStrikeCancelBody(orderId);
+  return signedFetch<T>(currentSession, "/v2/order/cancel", "DELETE", undefined, rawBody);
 }
 
 /** Reconcile a lost verify response with a read. Never retries verify or creates another wallet. */

@@ -60,9 +60,11 @@ export function useRoundData(): RoundData {
     const stream = new EventSource("/api/events");
     stream.addEventListener("connected", () => { if (!cancelled) setData(previous => ({ ...previous, transport: "stream" })); void refresh(); });
     stream.addEventListener("round", () => { void refresh(); });
+    const onStrikeOrderUpdate = () => { void refresh(); };
+    window.addEventListener("toruni:order-update", onStrikeOrderUpdate);
     stream.addEventListener("scoring-paused", () => { if (!cancelled) setData(previous => ({ ...previous, health: "unavailable" })); });
     stream.onerror = () => { if (!cancelled) setData(previous => ({ ...previous, transport: "polling" })); };
-    return () => { cancelled = true; window.clearTimeout(timer); stream.close(); };
+    return () => { cancelled = true; window.clearTimeout(timer); stream.close(); window.removeEventListener("toruni:order-update", onStrikeOrderUpdate); };
   }, []);
   return data;
 }

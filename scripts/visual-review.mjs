@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 
 export async function runVisualReview(port) {
   const output = '/tmp/toruni-visual-review';
+  const applicationOrigin = `http://localhost:${port}`;
   await mkdir(output, { recursive: true });
   const debuggingPort = 10000 + process.pid % 20000;
   const chrome = spawn('/root/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome', [
@@ -48,7 +49,7 @@ export async function runVisualReview(port) {
       await call('Emulation.setDeviceMetricsOverride', { width, height: width === 360 ? 640 : width === 390 ? 844 : 1100, deviceScaleFactor: 1, mobile: width < 768 });
       for (const route of ['/', '/arena?mode=spectate', '/results/00000000-0000-0000-0000-000000000000']) {
         console.info('Visual review route:',width,route);
-        await call('Page.navigate', { url: `http://127.0.0.1:${port}${route}` });
+        await call('Page.navigate', { url: `${applicationOrigin}${route}` });
         await new Promise(resolve => setTimeout(resolve, 3200));
         const viewport = await evaluate('document.querySelector("meta[name=viewport]")?.content');
         if (!viewport?.includes('width=device-width')) throw new Error('Viewport declaration is missing.');

@@ -1,10 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
-import { readCurrentRound, readRoundReport, readRoundAudit, readLeaderboard, readParticipantSnapshot } from "./database.ts";
-import { issueSession, readSessionHash, requestHasTrustedOrigin } from "./session.ts";
+import { readCurrentRound, readRoundReport, readRoundAudit, readLeaderboard, readParticipantSnapshot, query, transaction } from "./database.ts";
+import { issueSession, readSessionHash, requestHasTrustedOrigin, requireSession } from "./session.ts";
 import { openEventStream } from "./events.ts";
 import { readMarketSnapshot, readPublicAccount, readPublicPositions, StrikeReadError } from "./strike.ts";
+import { RoundGuardError, enrollParticipant, issueQuoteIntent } from "./roundService.ts";
+import { readGamePolicy, publicGamePolicy } from "./gamePolicy.ts";
+import { assertFreshRisk, assertWithinExposure, readAccountRisk } from "./accountRisk.ts";
+import { validateQuoteDraft } from "../shared/quoteValidation.ts";
+import { compareDecimals, parseDecimal } from "../shared/decimal.ts";
 
 
 function sendJson(response: ServerResponse, status: number, payload: unknown): void {
@@ -32,6 +37,82 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
     catch { sendJson(response, 503, { error: "Round service unavailable. Try again shortly." }); }
     return;
   }
+  if (request.method === "POST" && (url.pathname === "/api/rounds/current/join" || url.pathname === "/api/quote-intents")) {
+    if (!requestHasTrustedOrigin(request)) { sendJson(response, 403, { error: "Open Toruni from its application address before continuing." }); return; }
+    const sessionHash = await requireSession(request);
+    if (!sessionHash) { sendJson(response, 401, { error: "Your Toruni session expired. Refresh the page and try again." }); return; }
+    try {
+      const body = await readJsonBody(request);
+      const now = Date.now();
+      if (url.pathname === "/api/rounds/current/join") {
+        const accountId = body && typeof body === "object" && "accountId" in body && typeof body.accountId === "string" ? body.accountId : "";
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountId)) {
+          sendJson(response, 400, { error: "Connect and verify a Strike testnet account first." }); return;
+        }
+        const snapshot = await readMarketSnapshot("BTC-USD");
+        if (!snapshot.mark || !snapshot.depth || !snapshot.marketRules || snapshot.unavailableSources.length) {
+          throw new RoundGuardError("Strike market data is incomplete. Refresh before joining.", 503);
+        }
+        const policy = readGamePolicy(snapshot.marketRules);
+        if (!policy) throw new RoundGuardError("Round limits are not ready yet. You can still explore the live arena.", 423);
+        const risk = await readAccountRisk(accountId);
+        assertFreshRisk(risk, now);
+        assertWithinExposure(risk, policy.rules.maximumAccountExposure);
+        const result = await transaction(client => enrollParticipant(client, sessionHash, {
+          accountId, observedAt: Math.min(snapshot.checkedAt, snapshot.mark!.observedAt, snapshot.marketRules!.observedAt, risk.observedAt),
+          availableCollateral: risk.account.available_balance, requiredCollateral: policy.requiredCollateral,
+          absoluteExposure: risk.absoluteExposure,
+          effectiveLeverage: risk.account.symbolSettings?.["BTC-USD"]?.leverage ?? 0,
+          provenance: "strike-independent-read",
+        }, policy.rules, now));
+        sendJson(response, 201, result); return;
+      }
+
+      const side = body && typeof body === "object" && "side" in body ? body.side : null;
+      const price = body && typeof body === "object" && "price" in body ? body.price : null;
+      const size = body && typeof body === "object" && "size" in body ? body.size : null;
+      if ((side !== "buy" && side !== "sell") || typeof price !== "string" || typeof size !== "string") {
+        sendJson(response, 400, { error: "Choose a side and enter a price and size." }); return;
+      }
+      const participant = await query<{ claimed_account_id: string }>(`SELECT p.claimed_account_id FROM participants p
+        JOIN rounds r ON r.id=p.round_id WHERE p.session_hash=$1 AND r.status='active'`, [sessionHash]);
+      const accountId = participant[0]?.claimed_account_id;
+      if (!accountId) throw new RoundGuardError("Join an available round before reviewing a quote.");
+      const snapshot = await readMarketSnapshot("BTC-USD");
+      if (!snapshot.mark || !snapshot.depth || !snapshot.marketRules || snapshot.unavailableSources.length) {
+        throw new RoundGuardError("Strike market data is incomplete. Refresh before reviewing a quote.", 503);
+      }
+      const policy = readGamePolicy(snapshot.marketRules);
+      if (!policy) throw new RoundGuardError("Round limits are not ready yet. You can still explore the live arena.", 423);
+      const validation = validateQuoteDraft({ side, price, size }, snapshot.marketRules, snapshot.mark,
+        snapshot.depth, policy.rules.maximumQuoteNotional, now);
+      if (!validation.valid || !validation.notional) {
+        const error = validation.errors.price ?? validation.errors.size ?? validation.errors.general ?? "Review the quote details.";
+        sendJson(response, 422, { error, errors: validation.errors }); return;
+      }
+      const risk = await readAccountRisk(accountId);
+      assertFreshRisk(risk, now);
+      const notional = parseDecimal(validation.notional);
+      const available = parseDecimal(risk.account.available_balance);
+      if (!notional || !available || notional.coefficient <= 0n || risk.observedAt < now - 3_000) {
+        throw new RoundGuardError("Refresh Strike balance and positions before reviewing a quote.", 423);
+      }
+      if (compareDecimals(available, notional) < 0) throw new RoundGuardError("Available Strike collateral is below this quote’s notional.", 423);
+      const intent = await transaction(client => issueQuoteIntent(client, sessionHash, side, now, {
+        availableBalance: risk.account.available_balance, currentAbsoluteExposure: risk.absoluteExposure,
+        requestedNotional: validation.notional!, maximumAccountExposure: policy.rules.maximumAccountExposure,
+        price, size,
+      }));
+      sendJson(response, 201, { intent, validation: { notional: validation.notional }, marketCheckedAt: snapshot.checkedAt }); return;
+    } catch (error) {
+      if (error instanceof RoundGuardError) { sendJson(response, error.status, { error: error.message }); return; }
+      if (error instanceof StrikeReadError) {
+        const status = error.status === 404 ? 404 : error.status === 409 ? 409 : 503;
+        sendJson(response, status, { error: status === 404 ? "Strike account was not found." : "Strike testnet data is unavailable. Refresh and try again." }); return;
+      }
+      throw error;
+    }
+  }
   if (request.method !== "GET") {
     sendJson(response, 405, { error: "This endpoint only accepts GET requests." });
     return;
@@ -41,6 +122,10 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
     if (url.pathname === "/api/health") {
       sendJson(response, 200, { service: "toruni-local-api", network: "strike-v2-testnet" });
       return;
+    }
+    if (url.pathname === "/api/game-policy") {
+      const snapshot = await readMarketSnapshot("BTC-USD");
+      sendJson(response, 200, publicGamePolicy(snapshot.marketRules)); return;
     }
     if (url.pathname === "/api/events") { openEventStream(request, response); return; }
     if (url.pathname === "/api/participants/me") {
@@ -92,6 +177,7 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
     if (!url.pathname.startsWith("/api/")) { await serveClient(url.pathname, response); return; }
     sendJson(response, 404, { error: "API route not found." });
   } catch (error) {
+    if (error instanceof RoundGuardError) { sendJson(response, error.status, { error: error.message }); return; }
     if (error instanceof StrikeReadError) {
       const status = error.status === 404 ? 404 : error.status >= 400 && error.status < 600 ? error.status : 503;
       const message = status === 404
@@ -104,6 +190,25 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
     }
     sendJson(response, 503, { error: url.pathname.startsWith("/api/rounds/") ? "Round service unavailable. Try again shortly." : "Strike testnet data is unavailable." });
   }
+}
+
+async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+  const contentType = request.headers["content-type"];
+  if (typeof contentType !== "string" || !contentType.toLowerCase().startsWith("application/json")) {
+    throw new RoundGuardError("Send the request as JSON.", 415);
+  }
+  const declared = Number(request.headers["content-length"] ?? 0);
+  if (Number.isFinite(declared) && declared > 8_192) throw new RoundGuardError("Request is too large.", 413);
+  let body = "";
+  for await (const chunk of request) {
+    body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    if (body.length > 8_192) throw new RoundGuardError("Request is too large.", 413);
+  }
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Object required");
+    return parsed;
+  } catch { throw new RoundGuardError("Request details could not be read.", 400); }
 }
 
 

@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import type { StrikeSide, VerifiedQuote } from "../shared/contracts.ts";
-import { compareDecimals, parseDecimal } from "../shared/decimal.ts";
+import { alignDecimals, compareDecimals, formatDecimal, multiplyDecimals, parseDecimal, subtractDecimals } from "../shared/decimal.ts";
 import { scoringConstants } from "../shared/scoring.ts";
 
 export class RoundGuardError extends Error {
@@ -19,6 +19,7 @@ export interface IndependentAdmission {
   observedAt: number;
   availableCollateral: string;
   requiredCollateral: string;
+  absoluteExposure: string;
   effectiveLeverage: number;
   provenance: "strike-independent-read";
 }
@@ -27,10 +28,14 @@ export async function enrollParticipant(client: PoolClient, sessionHash: string,
   admission: IndependentAdmission, rules: RoundRules, now: number) {
   const available = parseDecimal(admission.availableCollateral);
   const required = parseDecimal(admission.requiredCollateral);
+  const exposure = parseDecimal(admission.absoluteExposure);
   const minimum = parseDecimal(rules.minimumRemainingNotional);
   const cap = parseDecimal(rules.maximumQuoteNotional);
-  if (!available || !required || !minimum || !cap || required.coefficient <= 0n || minimum.coefficient <= 0n
-    || compareDecimals(cap, minimum) < 0 || compareDecimals(available, required) < 0) {
+  const exposureLimit = parseDecimal(rules.maximumAccountExposure);
+  if (!available || !required || !exposure || !minimum || !cap || !exposureLimit
+    || required.coefficient <= 0n || minimum.coefficient <= 0n || exposure.coefficient < 0n || exposureLimit.coefficient <= 0n
+    || compareDecimals(cap, minimum) < 0 || compareDecimals(available, required) < 0
+    || compareDecimals(exposure, exposureLimit) > 0) {
     throw new RoundGuardError("Credited collateral and round limits must be verified before joining.", 423);
   }
   if (admission.provenance !== "strike-independent-read" || admission.effectiveLeverage !== 1
@@ -59,7 +64,8 @@ export async function enrollParticipant(client: PoolClient, sessionHash: string,
   return { participantId, roundId: round.id as string, startsAt: (round.starts_at as Date).getTime(), verificationState: "unverified" as const };
 }
 
-export async function issueQuoteIntent(client: PoolClient, sessionHash: string, side: StrikeSide, now: number) {
+export async function issueQuoteIntent(client: PoolClient, sessionHash: string, side: StrikeSide, now: number,
+  risk?: { availableBalance: string; currentAbsoluteExposure: string; requestedNotional: string; maximumAccountExposure: string; price: string; size: string }) {
   if (side !== "buy" && side !== "sell") throw new RoundGuardError("Choose bid or ask.", 400);
   const rows = await client.query(`SELECT p.id AS participant_id,p.round_id,r.market,r.starts_at,r.ends_at
     FROM participants p JOIN rounds r ON r.id = p.round_id JOIN app_sessions s ON s.session_hash=p.session_hash
@@ -68,13 +74,62 @@ export async function issueQuoteIntent(client: PoolClient, sessionHash: string, 
   if (!row || now < (row.starts_at as Date).getTime() || now >= (row.ends_at as Date).getTime()) {
     throw new RoundGuardError("Join an active round before requesting an order intent.");
   }
+  if (!risk) throw new RoundGuardError("Refresh Strike balance and positions before reviewing this quote.", 423);
+  const availableBalance = parseDecimal(risk.availableBalance);
+  const currentExposure = parseDecimal(risk.currentAbsoluteExposure);
+  const requestedNotional = parseDecimal(risk.requestedNotional);
+  const exposureLimit = parseDecimal(risk.maximumAccountExposure);
+  const price = parseDecimal(risk.price);
+  const size = parseDecimal(risk.size);
+  if (!availableBalance || !currentExposure || !requestedNotional || !exposureLimit || !price || !size
+    || availableBalance.coefficient < 0n || currentExposure.coefficient < 0n || requestedNotional.coefficient <= 0n
+    || exposureLimit.coefficient <= 0n || price.coefficient <= 0n || size.coefficient <= 0n
+    || compareDecimals(multiplyDecimals(price, size), requestedNotional) !== 0) {
+    throw new RoundGuardError("Strike risk data could not be verified.", 423);
+  }
+  if (compareDecimals(availableBalance, requestedNotional) < 0) {
+    throw new RoundGuardError("Available Strike collateral is below this quote’s notional.", 423);
+  }
   const outstanding = await client.query(`SELECT id FROM quote_intents WHERE participant_id = $1 AND round_id = $2 AND side = $3 AND status <> 'terminal'`,
     [row.participant_id, row.round_id, side]);
   if (outstanding.rowCount) throw new RoundGuardError("Resolve the existing quote on this side before creating another.");
+  const activeOrders = await client.query(`SELECT qi.status,oo.exchange_status,oo.price::text AS price,
+      oo.original_qty::text AS original_qty,oo.filled_qty::text AS filled_qty,oo.observed_at
+    FROM quote_intents qi LEFT JOIN LATERAL (SELECT exchange_status,price,original_qty,filled_qty,observed_at
+      FROM order_observations WHERE intent_id=qi.id ORDER BY observed_at DESC LIMIT 1) oo ON true
+    WHERE qi.participant_id=$1 AND qi.round_id=$2 AND qi.status<>'terminal' FOR UPDATE OF qi`, [row.participant_id, row.round_id]);
+  let restingExposure = { coefficient: 0n, scale: 0 };
+  for (const order of activeOrders.rows) {
+    if (order.status !== "observed" || order.exchange_status !== "open" || !(order.observed_at instanceof Date)
+      || now < order.observed_at.getTime() || now - order.observed_at.getTime() > 3_000) {
+      throw new RoundGuardError("Wait for Strike to confirm your existing offer before adding another.", 423);
+    }
+    const price = parseDecimal(String(order.price));
+    const original = parseDecimal(String(order.original_qty));
+    const filled = parseDecimal(String(order.filled_qty));
+    if (!price || !original || !filled || price.coefficient <= 0n || filled.coefficient < 0n) {
+      throw new RoundGuardError("An existing offer has incomplete risk data. Refresh its status first.", 423);
+    }
+    const remaining = subtractDecimals(original, filled);
+    if (remaining.coefficient <= 0n) continue;
+    const notional = multiplyDecimals(remaining, price);
+    const [left, right, scale] = alignDecimals(restingExposure, notional);
+    restingExposure = { coefficient: left + right, scale };
+  }
+  const proposedTotal = [formatDecimal(currentExposure), formatDecimal(restingExposure), risk.requestedNotional]
+    .map(value => parseDecimal(value)!)
+    .reduce((sum, value) => {
+      const [left, right, scale] = alignDecimals(sum, value);
+      return { coefficient: left + right, scale };
+    }, { coefficient: 0n, scale: 0 });
+  if (compareDecimals(proposedTotal, exposureLimit) > 0) {
+    throw new RoundGuardError("This quote would exceed the round’s position and order exposure limit.", 423);
+  }
   const sequence = await client.query<{ next_sequence: number }>(`SELECT coalesce(max(sequence),0)+1 AS next_sequence FROM quote_intents WHERE participant_id = $1 AND round_id = $2 AND side = $3`, [row.participant_id, row.round_id, side]);
   const clientOrderId = `trn${randomBytes(16).toString("hex")}`;
-  await client.query(`INSERT INTO quote_intents (id,participant_id,round_id,side,client_order_id,sequence,status,created_at)
-    VALUES ($1,$2,$3,$4,$5,$6,'issued',$7)`, [randomUUID(), row.participant_id, row.round_id, side, clientOrderId, sequence.rows[0]!.next_sequence, new Date(now)]);
+  await client.query(`INSERT INTO quote_intents (id,participant_id,round_id,side,client_order_id,sequence,status,created_at,next_verify_at,requested_price,requested_size)
+    VALUES ($1,$2,$3,$4,$5,$6,'issued',$7,$8,$9,$10)`, [randomUUID(), row.participant_id, row.round_id, side, clientOrderId,
+      sequence.rows[0]!.next_sequence, new Date(now), new Date(now + 4_000), risk.price, risk.size]);
   return { clientOrderId, roundId: row.round_id as string, symbol: row.market as string, side };
 }
 
@@ -87,6 +142,14 @@ export async function recordOrderObservation(client: PoolClient, quote: Verified
   if (!intent || intent.claimed_account_id !== quote.accountId || (intent.account_id && intent.account_id !== quote.accountId)
     || intent.side !== quote.side || intent.market !== quote.symbol || quote.lastVerifiedAt < (intent.created_at as Date).getTime()) {
     throw new RoundGuardError("Order evidence does not match a prior session-bound intent.");
+  }
+  const requestedPrice = parseDecimal(String(intent.requested_price));
+  const requestedSize = parseDecimal(String(intent.requested_size));
+  const observedPrice = parseDecimal(quote.price);
+  const observedSize = parseDecimal(quote.size);
+  if (!requestedPrice || !requestedSize || !observedPrice || !observedSize
+    || compareDecimals(requestedPrice, observedPrice) !== 0 || compareDecimals(requestedSize, observedSize) !== 0) {
+    throw new RoundGuardError("Observed order terms do not match the risk-checked quote intent.");
   }
   if ((intent.last_verified_at && quote.lastVerifiedAt < (intent.last_verified_at as Date).getTime())
     || (intent.status === "terminal" && (quote.status === "open" || quote.status === "pending"))) {

@@ -29,8 +29,10 @@ test("health identifies the testnet environment and sets browser protection head
 test("session creation rejects absent or foreign origins before database access", async () => {
   assert.equal((await request("/api/session", "POST")).status, 403);
   assert.equal((await request("/api/session", "POST", "https://untrusted.example")).status, 403);
-  assert.equal((await request("/api/quote-intents", "POST", "http://localhost:5173")).status, 405);
+  assert.equal((await request("/api/quote-intents", "POST", "http://localhost:5173")).status, 401);
   assert.equal((await request("/api/participants/me")).status, 401);
+  assert.equal((await request("/api/rounds/current/join", "POST", "http://localhost:5173")).status, 401);
+  assert.equal((await request("/api/quote-intents", "POST", "http://localhost:5173")).status, 401);
 });
 
 test("static serving never exposes local environment, private blueprint or source paths", async () => {
