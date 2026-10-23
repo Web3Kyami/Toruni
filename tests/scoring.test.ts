@@ -91,6 +91,15 @@ test("50 bps edge, crossing prices, pending orders, and incomplete dwell earn ze
   assert.equal(scoreVerifiedSample(edge, null, 1_000).scoreDeltaScaled, 0n);
 });
 
+test("rejected, canceled, expired, filled, and unknown orders never earn score", () => {
+  for (const status of ["rejected", "canceled", "expired", "filled", "unknown"] as const) {
+    const assessment = assessVerifiedQuote(quote({ status }), mark, policy, now);
+    assert.equal(assessment.eligible, false, status);
+    assert.equal(assessment.reason, "not-open", status);
+    assert.equal(scoreVerifiedSample(assessment, null, 1_000).scoreDeltaScaled, 0n, status);
+  }
+});
+
 test("partial fills use remaining size and engine-provided minimum notional", () => {
   const belowMinimum = assessVerifiedQuote(quote({ size: "0.0001", filled: "0.00009" }), mark, policy, now);
   const remaining = assessVerifiedQuote(quote({ size: "0.0002", filled: "0.0001" }), mark, policy, now);
