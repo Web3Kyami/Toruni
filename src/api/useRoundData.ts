@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RoundSnapshot } from "./rounds";
 export interface MakerStanding { participantId: string; score: string; asOf: number | null }
 export interface ParticipantSnapshot {
@@ -19,8 +19,9 @@ export interface RoundData {
 const empty: RoundData = { round: null, makers: [], participant: null, orders: [], serverTime: 0,
   receivedAt: 0, health: "checking", transport: "connecting" };
 
-export function useRoundData(): RoundData {
+export function useRoundData(): [RoundData, () => Promise<void>] {
   const [data, setData] = useState<RoundData>(empty);
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     let cancelled = false;
     let timer = 0;
@@ -55,6 +56,7 @@ export function useRoundData(): RoundData {
         if (!cancelled) setData(previous => ({ ...previous, health: "unavailable" }));
       } finally { refreshing = false; }
     };
+    refreshRef.current = refresh;
     const poll = async () => { await refresh(); if (!cancelled) timer = window.setTimeout(poll, 2_000); };
     void poll();
     const stream = new EventSource("/api/events");
@@ -66,5 +68,5 @@ export function useRoundData(): RoundData {
     stream.onerror = () => { if (!cancelled) setData(previous => ({ ...previous, transport: "polling" })); };
     return () => { cancelled = true; window.clearTimeout(timer); stream.close(); window.removeEventListener("toruni:order-update", onStrikeOrderUpdate); };
   }, []);
-  return data;
+  return [data, () => refreshRef.current()];
 }

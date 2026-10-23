@@ -13,9 +13,11 @@ import { validateQuoteDraft } from "../../shared/quoteValidation";
 import { connectStrikeUserStream } from "../api/userStream";
 import { formatUsd } from "./format";
 import { userFacingError } from "./errors";
+import { verifiedTerminalOrder } from "./requote";
 
 type Tab = "quotes" | "market" | "standings";
-type Dialog = "rules" | "how" | "connect" | "orders" | "risk" | "quote-review" | null;
+type Dialog = "rules" | "how" | "connect" | "orders" | "risk" | "quote-review" | "requote" | null;
+type RequoteStage = "confirm" | "canceling" | "checking" | "unresolved" | "filled" | null;
 type MarketState = "checking" | "live" | "partial" | "offline";
 type ConnectStage = "idle" | "checking-account" | "account-found" | "new-account" | "authorizing" | "connected" | "unknown";
 
@@ -55,7 +57,7 @@ function StatusPill({ state, children }: { state: "live" | "waiting" | "paused";
   return <span className={`status-pill status-pill--${state}`}><span className="status-dot" />{children}</span>;
 }
 
-function AppDialog({ kind, onClose, address, account, stage, error, onLookup, onAuthorize, onReconcile, recovering, risk, riskLoading, riskError, onRiskRefresh, orders, ordersCurrent, canJoinRound, joinBlockReason, joining, joinError, onJoin, quoteReview, quoteSubmitting, canWriteOrders, canCancelOrders, onSubmitQuote, onCancelOrder, cancelingOrderIds }: {
+function AppDialog({ kind, onClose, address, account, stage, error, onLookup, onAuthorize, onReconcile, recovering, risk, riskLoading, riskError, onRiskRefresh, orders, ordersCurrent, canJoinRound, joinBlockReason, joining, joinError, onJoin, quoteReview, quoteSubmitting, canWriteOrders, canCancelOrders, onSubmitQuote, onCancelOrder, cancelingOrderIds, requoteOrder, requoteStage, requoteError, onConfirmRequote, onCheckRequote, onOpenRisk }: {
   orders: ObservedOrder[];
   ordersCurrent: boolean;
   canJoinRound: boolean;
@@ -70,6 +72,12 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
   onSubmitQuote: () => void;
   onCancelOrder: (order: ObservedOrder) => void;
   cancelingOrderIds: Set<string>;
+  requoteOrder: ObservedOrder | null;
+  requoteStage: RequoteStage;
+  requoteError: string;
+  onConfirmRequote: () => void;
+  onCheckRequote: () => void;
+  onOpenRisk: () => void;
   kind: Dialog;
   onClose: () => void;
   address: string;
@@ -106,7 +114,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
   }, [kind]);
 
   const isConnect = kind === "connect";
-  const title = kind === "rules" ? "How scoring works" : kind === "how" ? "Make both sides count" : kind === "risk" ? "Margin and positions" : kind === "orders" ? "Your offers" : kind === "quote-review" ? `Review ${quoteReview?.side === "buy" ? "bid" : "ask"}` : "Connect wallet";
+  const title = kind === "rules" ? "How scoring works" : kind === "how" ? "Make both sides count" : kind === "risk" ? "Margin and positions" : kind === "orders" ? "Your offers" : kind === "quote-review" ? `Review ${quoteReview?.side === "buy" ? "bid" : "ask"}` : kind === "requote" ? `Requote ${requoteOrder?.side === "buy" ? "bid" : "ask"}` : "Connect wallet";
   if (!kind) return null;
   return createPortal(
     <div className={`dialog-overlay ${isConnect || kind === "risk" ? "dialog-overlay--side" : ""}`} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
@@ -120,7 +128,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
       if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     }}>
-      <div className="modal-heading"><h2 id="dialog-title">{title}</h2><button className="icon-button" onClick={onClose} aria-label="Close dialog">×</button></div>
+      <div className="modal-heading"><h2 id="dialog-title">{title}</h2><button className="icon-button" onClick={onClose} aria-label="Close dialog" disabled={requoteStage === "canceling" || requoteStage === "checking"}>×</button></div>
       {kind === "rules" && <div className="modal-copy">
         <p>Earn points by keeping buy and sell offers close to the market price.</p>
         <ul><li>Closer offers earn more. Offers 0.5% or more from the market earn no points.</li><li>Keep an offer open for five seconds before it starts scoring.</li><li>Keep both a buy and a sell offer open to earn a two-sided bonus.</li><li>Scoring pauses when current market or account information is unavailable.</li></ul>
@@ -143,6 +151,27 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
         <button className="button button--primary button--wide" onClick={onSubmitQuote} disabled={!canWriteOrders || quoteSubmitting}>
           {quoteSubmitting ? "Sending to Strike…" : "Place offer"}<Icon name="arrow" />
         </button>
+      </div>}
+      {kind === "requote" && requoteOrder && <div className="connect-flow requote-flow">
+        {requoteStage === "confirm" && <>
+          <p>Toruni will cancel this offer and wait for Strike to confirm it is closed. Then you can change the price or amount.</p>
+          <p className="risk-warning">It may fill before cancellation completes. A fill creates a position, and canceling does not close it.</p>
+          <button className="button button--primary button--wide" onClick={onConfirmRequote}>Cancel offer and edit</button>
+          <button className="button button--ghost button--wide" onClick={onClose}>Keep offer</button>
+        </>}
+        {(requoteStage === "canceling" || requoteStage === "checking") && <p role="status">Checking with Strike to confirm this offer is closed.</p>}
+        {requoteStage === "unresolved" && <>
+          <p className="inline-error" role="alert">{requoteError}</p>
+          <p>No replacement has been sent.</p>
+          <button className="button button--primary button--wide" onClick={onCheckRequote}>Check status again</button>
+          <button className="button button--ghost button--wide" onClick={onClose}>Return to offer</button>
+        </>}
+        {requoteStage === "filled" && <>
+          <p className="inline-error" role="alert">{requoteError}</p>
+          <p>Canceling an offer does not close a position created by a fill.</p>
+          <button className="button button--primary button--wide" onClick={onOpenRisk}>Check margin and positions</button>
+          <button className="button button--ghost button--wide" onClick={onClose}>Close</button>
+        </>}
       </div>}
       {kind === "risk" && <div className="connect-flow">
         {riskLoading && <p role="status">Checking Strike account data…</p>}
@@ -221,7 +250,9 @@ export function App() {
   }, []);
   const resultsRoundId = pathname.match(/^\/results\/([0-9a-f-]{36})$/i)?.[1];
   const [clock, setClock] = useState(Date.now());
-  const roundData = useRoundData();
+  const [roundData, refreshRoundData] = useRoundData();
+  const roundDataRef = useRef(roundData);
+  useEffect(() => { roundDataRef.current = roundData; }, [roundData]);
   useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [tab, setTab] = useState<Tab>("quotes");
@@ -246,6 +277,9 @@ export function App() {
   const [quoteDrafts, setQuoteDrafts] = useState({ buy: { price: "", size: "" }, sell: { price: "", size: "" } });
   const [quoteReview, setQuoteReview] = useState<{ side: "buy" | "sell"; price: string; size: string; notional: string } | null>(null);
   const [quoteSubmitting, setQuoteSubmitting] = useState(false);
+  const [requoteOrder, setRequoteOrder] = useState<ObservedOrder | null>(null);
+  const [requoteStage, setRequoteStage] = useState<RequoteStage>(null);
+  const [requoteError, setRequoteError] = useState("");
   const [cancelingOrderIds, setCancelingOrderIds] = useState<Set<string>>(() => new Set());
   const [orderActionMessage, setOrderActionMessage] = useState("");
   const refreshRisk = async (accountId = account?.account_id) => {
@@ -543,6 +577,73 @@ export function App() {
     }
   };
 
+  const findRequoteOutcome = async (order: ObservedOrder) => {
+    const deadline = Date.now() + 12_000;
+    while (Date.now() < deadline) {
+      await refreshRoundData();
+      const outcome = verifiedTerminalOrder(roundDataRef.current.orders, order);
+      if (outcome) return outcome;
+      await new Promise(resolve => window.setTimeout(resolve, 500));
+    }
+    return null;
+  };
+
+  const finishRequote = async (order: ObservedOrder) => {
+    setRequoteStage("checking");
+    setRequoteError("");
+    let outcome;
+    try { outcome = await findRequoteOutcome(order); }
+    catch { outcome = null; }
+    if (!outcome) {
+      setRequoteStage("unresolved");
+      setRequoteError("Toruni could not confirm that this offer is closed. It may still be open. Check its status before changing it.");
+      return;
+    }
+    if (outcome.hasFill || outcome.status === "filled") {
+      setRisk(null);
+      setRequoteStage("filled");
+      setRequoteError("This offer filled before it closed. Refresh your position details before placing another offer.");
+      return;
+    }
+    const side = order.side === "buy" ? "buy" : "sell";
+    setQuoteDrafts(previous => ({ ...previous, [side]: {
+      price: outcome.order.price ?? order.price ?? previous[side].price,
+      size: outcome.order.original_qty ?? order.original_qty ?? previous[side].size,
+    } }));
+    setRequoteOrder(null);
+    setRequoteStage(null);
+    setRequoteError("");
+    setDialog(null);
+    setNotice("Offer closed. Change the price or amount, then review the replacement.");
+  };
+
+  const startRequote = (order: ObservedOrder) => {
+    if (!liveAccount || round?.status !== "active" || order.exchange_status !== "open"
+      || order.intent_status !== "observed" || !order.exchange_order_id
+      || !/^[1-9]\d{0,18}$/.test(order.exchange_order_id)) return;
+    setRequoteOrder(order);
+    setRequoteStage("confirm");
+    setRequoteError("");
+    setDialog("requote");
+  };
+
+  const confirmRequote = async () => {
+    const order = requoteOrder;
+    if (!order || !liveAccount || requoteStage !== "confirm") return;
+    setRequoteStage("canceling");
+    setRequoteError("");
+    try {
+      await cancelToruniOrder({ clientOrderId: order.client_order_id, exchangeOrderId: order.exchange_order_id!, symbol: "BTC-USD" });
+    } catch {
+      // A lost response does not prove the order stayed open. Read its exact status before offering a replacement.
+    }
+    await finishRequote(order);
+  };
+
+  const checkRequoteAgain = async () => {
+    if (requoteOrder && (requoteStage === "unresolved" || requoteStage === "filled")) await finishRequote(requoteOrder);
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -632,14 +733,19 @@ export function App() {
             </div>
             <div className="quote-grid">
               {(["buy", "sell"] as const).map(side => {
-                const order = [...roundData.orders].reverse().find(item => item.side === side);
+                const order = [...roundData.orders].reverse().find(item => item.side === side && item.intent_status !== "terminal")
+                  ?? [...roundData.orders].reverse().find(item => item.side === side);
                 const status = order?.verification_error ? "CHECKING" : order?.exchange_status?.toUpperCase()
                   ?? (participantJoined ? "READY" : "NOT JOINED");
                 const statusState = order?.exchange_status === "open" ? "live" as const
                   : order?.verification_error || order?.intent_status === "issued" || order?.intent_status === "submitted" ? "waiting" as const
                     : "paused" as const;
+                const openOrder = order?.exchange_status === "open" && order.intent_status === "observed"
+                  && order.exchange_order_id && /^[1-9]\d{0,18}$/.test(order.exchange_order_id) ? order : null;
                 return <QuoteCard key={side} side={side === "buy" ? "bid" : "ask"} markPrice={markPrice} value={quoteDrafts[side]}
                   status={status} statusState={statusState} canReview={canReviewQuote(side)}
+                  openOrder={openOrder} canRequote={Boolean(liveAccount && round?.status === "active" && roundData.health === "current")}
+                  onRequote={startRequote}
                   onChange={(field, value) => setQuoteDrafts(previous => ({ ...previous, [side]: { ...previous[side], [field]: value } }))}
                   onReview={() => void reviewQuote(side)} />;
               })}
@@ -695,8 +801,14 @@ export function App() {
         onSubmitQuote={() => void submitQuote()}
         onCancelOrder={cancelObservedOrder}
         cancelingOrderIds={cancelingOrderIds}
+        requoteOrder={requoteOrder}
+        requoteStage={requoteStage}
+        requoteError={requoteError}
+        onConfirmRequote={() => void confirmRequote()}
+        onCheckRequote={() => void checkRequoteAgain()}
+        onOpenRisk={() => { setDialog("risk"); void refreshRisk(); }}
         kind={dialog}
-        onClose={() => setDialog(null)}
+        onClose={() => { if (requoteStage !== "canceling" && requoteStage !== "checking") setDialog(null); }}
         address={walletAddress}
         account={account}
         stage={connectStage}
@@ -714,7 +826,7 @@ export function App() {
   );
 }
 
-function QuoteCard({ side, markPrice, onReview, value, onChange, status, statusState, canReview }: {
+function QuoteCard({ side, markPrice, onReview, value, onChange, status, statusState, canReview, openOrder, canRequote, onRequote }: {
   side: "bid" | "ask";
   markPrice: string | null;
   onReview: () => void;
@@ -723,6 +835,9 @@ function QuoteCard({ side, markPrice, onReview, value, onChange, status, statusS
   status: string;
   statusState: "live" | "waiting" | "paused";
   canReview: boolean;
+  openOrder: ObservedOrder | null;
+  canRequote: boolean;
+  onRequote: (order: ObservedOrder) => void;
 }) {
   const isBid = side === "bid";
   return <article className={`quote-card panel quote-card--${side}`}>
@@ -734,9 +849,13 @@ function QuoteCard({ side, markPrice, onReview, value, onChange, status, statusS
       <label>PRICE <span>USD</span><div className="input-shell"><span>$</span><input aria-label={`${isBid ? "Bid" : "Ask"} price`} inputMode="decimal" placeholder={markPrice ? "Enter price" : "Waiting for mark"} value={value.price} onChange={event => onChange("price", event.target.value)} disabled={!canReview} /></div></label>
       <label>SIZE <span>BTC</span><div className="input-shell"><input aria-label={`${isBid ? "Bid" : "Ask"} size`} inputMode="decimal" placeholder="Enter size" value={value.size} onChange={event => onChange("size", event.target.value)} disabled={!canReview} /><span>BTC</span></div></label>
     </div>
-    <button className={`button quote-button quote-button--${side}`} onClick={onReview}>
-      Review {isBid ? "bid" : "ask"} <Icon name="arrow" size={15} />
-    </button>
+    {openOrder
+      ? <button className={`button quote-button quote-button--${side}`} onClick={() => onRequote(openOrder)} disabled={!canRequote}>
+        Requote {isBid ? "bid" : "ask"} <Icon name="arrow" size={15} />
+      </button>
+      : <button className={`button quote-button quote-button--${side}`} onClick={onReview} disabled={!canReview}>
+        Review {isBid ? "bid" : "ask"} <Icon name="arrow" size={15} />
+      </button>}
   </article>;
 }
 
@@ -745,7 +864,7 @@ function OrderRecords({ orders, current, activity = false, onCancel, canCancel, 
   canCancel: boolean; cancelingOrderIds: Set<string>;
 }) {
   if (!orders.length) return <div className="empty-orders"><p>{!current ? "Order status unavailable. Offers may still be open." : activity ? "No recent activity" : "No offers yet"}</p></div>;
-  return <div className="order-records">{!current && <p role="status">Order status unavailable. Offers may still be open.</p>}{orders.map(order => <article className="order-record" key={order.client_order_id}>
+  return <div className="order-records">{!current && <p role="status">Order status unavailable. Offers may still be open.</p>}{[...orders].reverse().map(order => <article className="order-record" key={order.client_order_id} data-client-order-id={order.client_order_id}>
     <div><strong>{order.side === "buy" ? "Bid" : "Ask"}</strong><span>{readableOrderStatus(order)}</span></div>
     <p>{order.price ? `$${formatPrice(order.price)}` : "Price pending"} · {order.original_qty ?? "—"} BTC</p>
     <small>{order.filled_qty === null ? "Fill details pending" : `${order.filled_qty} BTC filled`}</small>
