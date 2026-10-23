@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useRoundData, type ObservedOrder } from "../api/useRoundData";
 import { ScorePanel, StandingsPanel } from "./RoundPanels";
 import { Results } from "./Results";
@@ -66,18 +67,33 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
   riskError: string;
   onRiskRefresh: () => void;
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (kind && !dialog.open) dialog.showModal();
-    if (!kind && dialog.open) dialog.close();
+    if (!kind) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const root = document.getElementById("root");
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    if (root) root.inert = true;
+    const resize = () => dialogRef.current?.parentElement?.style.setProperty("--sheet-height", `${window.visualViewport?.height ?? window.innerHeight}px`);
+    resize();
+    window.visualViewport?.addEventListener("resize", resize);
+    dialogRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => {
+      window.visualViewport?.removeEventListener("resize", resize);
+      document.body.style.overflow = previousOverflow;
+      if (root) root.inert = false;
+      previous?.focus();
+    };
   }, [kind]);
 
   const isConnect = kind === "connect";
   const title = kind === "rules" ? "How scoring works" : kind === "how" ? "Make both sides count" : kind === "risk" ? "Margin and positions" : kind === "orders" ? "Your Toruni orders" : "Connect to Strike testnet";
-  return (
-    <dialog ref={dialogRef} className={isConnect || kind === "risk" ? "modal modal--wallet" : "modal"} onClose={onClose} aria-labelledby="dialog-title" onKeyDown={event => {
+  if (!kind) return null;
+  return createPortal(
+    <div className={`dialog-overlay ${isConnect || kind === "risk" ? "dialog-overlay--side" : ""}`} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <div role="dialog" aria-modal="true" ref={dialogRef} className={isConnect || kind === "risk" ? "modal modal--wallet" : "modal"} aria-labelledby="dialog-title" onKeyDown={event => {
+      if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
       if (event.key !== "Tab") return;
       const controls = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')]
         .filter(control => control.getClientRects().length > 0);
@@ -89,16 +105,15 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
       <div className="modal-topline"><span>TORUNI · STRIKE V2 TESTNET</span><button className="icon-button" onClick={onClose} aria-label="Close dialog">×</button></div>
       <h2 id="dialog-title">{title}</h2>
       {kind === "rules" && <div className="modal-copy">
-        <p>Points reward real post-only quotes that rest close to Strike’s mark price. Every order must be independently confirmed open by Toruni’s server.</p>
-        <div className="formula-card"><span>POINTS / MINUTE</span><strong>25B + 25A + 50 min(B, A)</strong><small>B and A are quote quality from 0 to 1. Quality falls linearly to zero at 50 bps.</small></div>
-        <ul><li>Only verified open GTC limit orders count.</li><li>A quote must rest for five observed seconds before it can earn points.</li><li>Stale market, order, or risk data pauses scoring.</li><li>Filled orders can create positions. Canceling the remaining order does not close a position.</li></ul>
-        <p className="modal-note">Scoring version: observed two-sided v0.1. No fills, rivals, or profits are simulated.</p>
+        <p>Earn points by keeping buy and sell offers close to the market price.</p>
+        <ul><li>Closer offers earn more. Offers 0.5% or more from the market earn no points.</li><li>Keep an offer open for five seconds before it starts scoring.</li><li>Keep both a buy and a sell offer open to earn a two-sided bonus.</li><li>Scoring pauses when current market or account information is unavailable.</li></ul>
+        <p className="risk-warning">An offer can fill and create a position. Canceling the offer does not close that position.</p>
       </div>}
       {kind === "how" && <div className="how-content">
-        <div className="how-rails" aria-label="Illustration showing bid, mark, and ask"><span>BID</span><i /><b>MARK</b><i /><span>ASK</span></div>
-        <p>Place a real buy quote below the mark and a real sell quote above it. Strike confirms the orders; Toruni checks their status and scores the time they stay eligible.</p>
+        <div className="how-rails" aria-label="Buy below the market price; sell above it"><span>BUY</span><i /><b>MARKET</b><i /><span>SELL</span></div>
+        <p>Offer to buy below the market price and sell above it. Keep both offers open during the three-minute round to earn points.</p>
         <div className="how-steps"><span><b>01</b> Connect and check account</span><span><b>02</b> Review each quote</span><span><b>03</b> Keep both sides eligible</span></div>
-        <p className="modal-note">Illustration only. No market price or order is shown here.</p>
+
       </div>}
       {kind === "orders" && <OrderRecords orders={orders} current={ordersCurrent} />}
       {kind === "risk" && <div className="connect-flow">
@@ -107,27 +122,27 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
         {!account && <p>Connect a wallet and check its Strike testnet account to view margin and positions.</p>}
         {risk && <><div className="balance-row"><span>Available balance</span><strong>{risk.account.available_balance}</strong></div><p className="metric-sub">Observed {new Date(risk.observedAt).toLocaleTimeString()}</p>
           <h3>Open positions</h3>{risk.positions.length === 0 ? <p>No open positions were returned by Strike.</p> : <ul className="position-list">{risk.positions.map((position, index) => <li key={`${position.symbol}-${index}`}><strong>{position.symbol}</strong><span>Size {position.size}</span><span>{position.leverage}x · {position.marginMode}</span></li>)}</ul>}
-          <p className="modal-note">BTC leverage: {risk.account.symbolSettings?.["BTC-USD"]?.leverage !== undefined ? `${risk.account.symbolSettings["BTC-USD"].leverage}x` : "Not verified"}. Toruni requires independently checked 1x settings before new game quotes.</p></>}
+          <p className="modal-note">BTC leverage: {risk.account.symbolSettings?.["BTC-USD"]?.leverage !== undefined ? `${risk.account.symbolSettings["BTC-USD"].leverage}x` : "Not verified"}. Toruni requires 1x leverage before new game quotes.</p></>}
         {account && <button className="button button--ghost button--wide" onClick={onRiskRefresh} disabled={riskLoading}>Refresh account and positions</button>}
         <p className="risk-warning">Canceling an order does not close a filled position. Toruni does not automatically close positions.</p>
       </div>}
       {isConnect && <div className="connect-flow">
         {stage === "connected" && address && <div className="connected-summary">
-          <StatusPill state="live">BUILDER API WALLET AUTHORIZED</StatusPill>
+          <StatusPill state="live">WALLET AUTHORIZED</StatusPill>
           <p className="wallet-address"><Icon name="wallet" size={17} />{shortAddress(address)}</p>
-          {account ? <div className="balance-row"><span>Available balance</span><strong>{account.available_balance}</strong></div> : <p className="inline-error" role="status"><Icon name="alert" size={17} />Public account data is unavailable. Do not authorize again; refresh the account check later.</p>}
-          <p className="modal-note">This session key stays in browser memory. Order placement remains locked until market limits, credited collateral, and a live round are verified.</p>
+          {account ? <div className="balance-row"><span>Available balance</span><strong>{account.available_balance}</strong></div> : <p className="inline-error" role="status"><Icon name="alert" size={17} />Your wallet is authorized, but the balance is unavailable. Check again shortly.</p>}
+          <p className="modal-note">Keep this tab open to stay connected. Your Strike balance must be confirmed before you can join.</p>
           {error && <p className="inline-error" role="status">{error}</p>}
         </div>}
         {stage === "unknown" && <div className="unknown-auth">
           <StatusPill state="paused">AUTHORIZATION STATUS UNKNOWN</StatusPill>
-          <p>Strike may have created a Toruni API wallet, but the response did not arrive. Do not authorize again yet; that could revoke the wallet Strike just created.</p>
-          <p className="modal-note">No order or deposit was submitted. Keep this tab open while the existing API key is checked.</p>
+          <p>Your approval may have succeeded. Check its status before approving again; a new approval replaces the previous connection.</p>
+          <p className="modal-note">No order or deposit was submitted. Keep this tab open while we check your connection.</p>
           <button className="button button--primary button--wide" onClick={onReconcile} disabled={recovering}>{recovering ? "Checking authorization…" : "Check authorization status"}</button>
           {error && <p className="inline-error" role="alert">{error}</p>}
         </div>}
         {stage !== "connected" && stage !== "unknown" && <>
-          <p>Toruni checks your Ethereum wallet against Strike’s public testnet account data first. This check does not place an order or transfer funds.</p>
+          <p>Connect your wallet to check your Strike testnet balance. Connecting does not place orders or move funds.</p>
           {stage === "account-found" && <div className="account-found"><StatusPill state="live">ACCOUNT FOUND</StatusPill><span>{address ? shortAddress(address) : ""}</span></div>}
           {stage === "new-account" && <div className="account-found account-found--new"><StatusPill state="waiting">NO ACCOUNT FOUND</StatusPill><span>Strike may create one after you approve its message.</span></div>}
           {address && <p className="wallet-address"><Icon name="wallet" size={17} />{shortAddress(address)}</p>}
@@ -136,24 +151,24 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
             <Icon name="wallet" />{getBuilderCode() ? "Connect wallet and check account" : "Builder code required"}<Icon name="arrow" />
           </button>}
           {stage === "account-found" && <>
-            <div className="authorization-notice"><Icon name="shield" size={18} /><span>Next, your wallet will sign a Strike authorization message. It approves Toruni at <b>0 bps</b>. Reconnecting replaces any existing API wallet for this builder. No trade or deposit is authorized.</span></div>
+            <div className="authorization-notice"><Icon name="shield" size={18} /><span>Approve Toruni in your wallet. Toruni adds <b>no extra trading fee</b>. This replaces any previous Toruni authorization. Your approval does not place an order or deposit funds.</span></div>
             <button className="button button--primary button--wide" onClick={onAuthorize}>
               Authorize Toruni on Strike <Icon name="arrow" />
             </button>
           </>}
           {stage === "new-account" && <>
-            <div className="authorization-notice"><Icon name="shield" size={18} /><span>After your approval, Strike creates an account and a Toruni API wallet. The fee cap is <b>0 bps</b>. No trade or deposit is authorized.</span></div>
+            <div className="authorization-notice"><Icon name="shield" size={18} /><span>Your approval lets Strike set up access for Toruni, with <b>no extra Toruni trading fee</b>. It does not place an order or deposit funds.</span></div>
             <button className="button button--primary button--wide" onClick={onAuthorize}>
               Continue to wallet signature <Icon name="arrow" />
             </button>
           </>}
           {stage === "checking-account" && <div className="progress-line"><span className="spinner" />Checking Strike testnet…</div>}
           {stage === "authorizing" && <div className="progress-line"><span className="spinner" />Waiting for wallet approval…</div>}
-          {!getBuilderCode() && <p className="modal-note">No active Toruni builder code is configured in this build, so wallet access is not requested.</p>}
+          {!getBuilderCode() && <p className="modal-note">Wallet connection is unavailable. You can still explore the arena.</p>}
         </>}
         <button className="button button--ghost button--wide spectator-return" onClick={onClose}>Return as spectator</button>
       </div>}
-    </dialog>
+    </div></div>, document.body
   );
 }
 
@@ -342,7 +357,7 @@ export function App() {
     ? "Live mark, depth, and engine rules are required."
     : !liveAccount
       ? "Connect and verify a Strike testnet account first."
-      : "A funded account and server-open round are not verified yet.";
+      : "Confirm your Strike balance, then join an available round.";
 
   return (
     <div className="app-shell">
@@ -399,7 +414,7 @@ export function App() {
             <div className="mark-block">
               <span className="metric-label">STRIKE MARK <span className="help-dot" title="Strike mark price is the reference Toruni uses to grade quote proximity.">?</span></span>
               <strong className="mark-value">{markPrice ? `$${formatPrice(markPrice)}` : "—"}</strong>
-              <span className="metric-sub">{markPrice ? "Public Strike testnet feed" : "Waiting for a live Strike mark"}</span>
+              <span className="metric-sub">{markPrice ? "Strike testnet" : "Waiting for a live Strike mark"}</span>
             </div>
             <div className="book-heading"><span>TOP OF BOOK</span><span>PRICE <small>·</small> SIZE</span></div>
             {market?.depth ? <div className="book-table">
@@ -408,7 +423,7 @@ export function App() {
               <div className="book-side book-side--bid"><span>BID</span><strong>{bid ? `$${formatPrice(bid.price)}` : "—"}</strong><small>{bid?.size ?? "—"}</small></div>
             </div> : <div className="book-empty"><span className="book-empty-line"><i /><i /><i /><i /><i /></span><p>{currentMarketState === "offline" ? "Book unavailable" : "Waiting for Strike depth"}</p></div>}
             <div className="market-foot"><span><i className="source-dot" />SOURCE</span><strong>{market?.depth ? "Strike V2 testnet" : "Not verified"}</strong></div>
-            <div className="market-foot"><span>ENGINE RULES</span><strong>{market?.marketRules ? "Received" : "Unavailable"}</strong></div>
+            <div className="market-foot"><span>MARKET LIMITS</span><strong>{market?.marketRules ? "Received" : "Unavailable"}</strong></div>
             <button className="text-button" onClick={refreshMarket}>Refresh live data <Icon name="arrow" size={14} /></button>
           </aside>
 
@@ -417,7 +432,7 @@ export function App() {
               <div className="round-left">
                 <span className="panel-kicker">{round ? round.status.replaceAll("_", " ") : "NEXT CHALLENGE NOT SCHEDULED"}</span>
                 <div className="round-title-row"><h2>Two sides. One score.</h2><span className="round-length"><Icon name="clock" size={14} /> {countdown ?? "180 SEC"}</span></div>
-                <p>One maker per account · real Strike orders · no simulated fills</p>
+                <p>Three minutes. Keep both sides competitive.</p>
               </div>
               <button className="button button--join" onClick={openConnect} disabled={!getBuilderCode()} title={!getBuilderCode() ? "Toruni needs an active Strike builder code before wallet authorization." : gameBlockReason}>
                 Join challenge <Icon name="arrow" size={16} />
@@ -433,7 +448,7 @@ export function App() {
               <QuoteCard side="ask" markPrice={markPrice} blockReason={gameBlockReason} onReview={() => setNotice(gameBlockReason)} />
             </div>
             {notice && <p className="quote-notice" role="status"><Icon name="alert" size={15} />{notice}</p>}
-            <p className="quote-safety"><Icon name="shield" size={15} />Post-only GTC limit orders only. Review price and size before each order.</p>
+            <p className="quote-safety"><Icon name="shield" size={15} />Offers stay open until filled or canceled. An offer that would trade immediately is rejected.</p>
 
             <div className="lower-grid lower-grid--orders">
 
@@ -451,11 +466,11 @@ export function App() {
             <StandingsPanel data={roundData} />
             <section className="panel trust-panel">
               <div className="trust-icon"><Icon name="shield" size={17} /></div>
-              <div><strong>Proof before points</strong><p>Toruni scores only after Strike confirms your order is open.</p></div>
+              <div><strong>Open offers earn points</strong><p>Keep your offers open and close to the market.</p></div>
               <button className="icon-button icon-button--subtle" onClick={() => setDialog("rules")} aria-label="Read verification rules"><Icon name="arrow" size={15} /></button>
             </section>
             <section className="panel activity-panel">
-              <div className="panel-heading panel-heading--compact"><div><span className="panel-kicker">ROUND FEED</span><h2>Recent activity</h2></div><span className="feed-live-label">{roundData.health !== "current" ? "PAUSED" : roundData.round ? "SERVER OBSERVATIONS" : "AWAITING ROUND"}</span></div>
+              <div className="panel-heading panel-heading--compact"><div><span className="panel-kicker">ROUND FEED</span><h2>Recent activity</h2></div><span className="feed-live-label">{roundData.health !== "current" ? "PAUSED" : roundData.round ? "LATEST UPDATES" : "AWAITING ROUND"}</span></div>
               <OrderRecords orders={roundData.orders.filter(order => order.observed_at).slice(0, 4)} current={roundData.health === "current"} activity />
             </section>
           </aside>
@@ -511,7 +526,7 @@ function QuoteCard({ side, markPrice, blockReason, onReview }: {
       <label>PRICE <span>USD</span><div className="input-shell"><span>$</span><input aria-label={`${isBid ? "Bid" : "Ask"} price`} inputMode="decimal" placeholder={markPrice ? "Enter price" : "Waiting for mark"} disabled /></div></label>
       <label>SIZE <span>BTC</span><div className="input-shell"><input aria-label={`${isBid ? "Bid" : "Ask"} size`} inputMode="decimal" placeholder="Enter size" disabled /><span>BTC</span></div></label>
     </div>
-    <div className="quote-meta"><span><Icon name="shield" size={14} /> POST-ONLY</span><span>GTC</span><span>≤ 50 BPS</span></div>
+    <div className="quote-meta"><span><Icon name="shield" size={14} />Resting offers only</span></div>
     <button className={`button quote-button quote-button--${side}`} onClick={onReview} disabled>
       Review {isBid ? "bid" : "ask"} <Icon name="arrow" size={15} />
     </button>
@@ -520,7 +535,7 @@ function QuoteCard({ side, markPrice, blockReason, onReview }: {
 }
 
 function OrderRecords({ orders, current, activity = false }: { orders: ObservedOrder[]; current: boolean; activity?: boolean }) {
-  if (!orders.length) return <div className="empty-orders"><p>{!current ? "Order status is unavailable" : activity ? "Waiting for verified activity" : "No Toruni orders in this session"}</p><small>{!current ? "Checking again automatically. No order is assumed closed." : "Pending and unknown orders never count as open."}</small></div>;
+  if (!orders.length) return <div className="empty-orders"><p>{!current ? "Order status is unavailable" : activity ? "Waiting for verified activity" : "No Toruni orders in this session"}</p><small>{!current ? "Checking again automatically. No order is assumed closed." : "Only confirmed open offers earn points."}</small></div>;
   return <div className="order-records">{!current && <p role="status">Updates paused. These are the last observed statuses.</p>}{orders.map(order => <article className="order-record" key={order.client_order_id}>
     <div><strong>{order.side === "buy" ? "Bid" : "Ask"}</strong><span>{order.verification_error ? "Verification unavailable" : order.exchange_status || order.intent_status}</span></div>
     <p>{order.price ? `$${formatPrice(order.price)}` : "Price not verified"} · {order.original_qty ?? "Unverified"} BTC</p>

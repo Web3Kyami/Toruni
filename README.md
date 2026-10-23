@@ -66,3 +66,5 @@ npm run build
 ## Attribution
 
 Strike API behavior and signing conventions follow the [Strike Builder Reference](https://github.com/strike-finance/strike-builder-reference) and [official Strike API documentation](https://docs.strikefinance.org/api). No Strike app code, icons, or branding assets are copied. MIT licensed.
+
+Typography uses bundled Plus Jakarta Sans from Fontsource 5.3.0, licensed under the SIL Open Font License. The license is included at `src/assets/plus-jakarta-sans-LICENSE.txt`.
