@@ -22,8 +22,8 @@ export async function readAccountRisk(accountId: string): Promise<AccountRiskEvi
   ]);
   if (!mark) throw new RoundGuardError("Strike market data is stale. Refresh before joining or reviewing a quote.", 503);
   const settings = account.symbolSettings?.["BTC-USD"];
-  if (!settings || settings.leverage !== 1 || !settings.allowPreTrade) {
-    throw new RoundGuardError("Set BTC-USD to 1x and enable pre-trade access in Strike before joining.", 423);
+  if (!settings || settings.leverage !== 1) {
+    throw new RoundGuardError("Set BTC-USD to 1x in Strike before joining.", 423);
   }
 
   const markValue = parseDecimal(mark.markPrice);

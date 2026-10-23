@@ -45,6 +45,7 @@ The Vercel deployment serves the interface and the existing HTTP API through `ap
 The scoring worker runs through `npm run start:server` on a persistent Node host sharing the same database. It is not started inside Vercel request handlers. Vercel clients poll persisted observations; the persistent Node service retains its event stream. Keep round entry closed until the worker and the approved risk limits are configured.
 
 - `src/`: React interface, Builder Connect, browser-only Ed25519 signing, and testnet order adapters.
+- `src/api/deposits.ts`: Sepolia USDC quote, unsigned-transaction validation, and submission confirmation adapters. Preparation checks the connected network and deployed contracts, binds calldata to the account and quote, and permits only an exact-amount approval. It never broadcasts a transaction; a caller must obtain wallet approval, track its receipt, and separately verify credited Strike collateral.
 - `server/`: secure sessions, independent Strike reads, round lifecycle, a database-held scoring leader, server-sent updates, and report APIs.
 - `shared/`: typed contracts, exact decimal validation, fixed-point scoring, and deterministic ledger replay.
 - `sql/`: ordered PostgreSQL migrations with checksum verification.

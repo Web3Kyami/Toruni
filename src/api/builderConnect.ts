@@ -1,5 +1,6 @@
 import { STRIKE_API_ORIGIN } from "./config.ts";
 import type { EthereumProvider } from "./walletProvider";
+import { validateBuilderConsent } from "../../shared/builderConsent.ts";
 
 interface BuilderConnectResponse {
   account_id: string;
@@ -141,7 +142,7 @@ export async function authorizeBuilderConnect(
         public_key: keys.publicKey,
       },
     );
-    if (!challenge.nonce || !challenge.message_to_sign) {
+    if (!validateBuilderConsent(challenge, { address, publicKey: keys.publicKey, builderCode: code })) {
       throw new Error("Strike returned an incomplete authorization challenge.");
     }
 

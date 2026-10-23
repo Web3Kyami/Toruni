@@ -21,6 +21,7 @@
 }
 
 * { box-sizing: border-box; }
+small { font-size: max(14px, 0.833333em); }
 html { scroll-behavior: smooth; background: var(--bg); }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); color: var(--text); }
 button, input { font: inherit; }
