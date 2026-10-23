@@ -50,7 +50,7 @@ export function Results({ roundId, onBack, onRules, myOrders = [], canCancel = f
           const ownOrder = myOrders.find(item => item.client_order_id === order.client_order_id);
           const canRequestCancel = canCancel && ownOrder?.exchange_status === "open" && Boolean(ownOrder.exchange_order_id);
           const cancelRequested = cancelingOrderIds.has(order.client_order_id);
-          return <tr key={order.client_order_id}><td>{order.side === "buy" ? "Bid" : "Ask"}</td><td>{order.price}</td><td>{order.original_qty}</td><td>{order.filled_qty}</td><td>{resultOrderStatus(order.exchange_status)}</td>
+          return <tr key={order.client_order_id}><td>{order.side === "buy" ? "Bid" : "Ask"}</td><td>{formatPrice(order.price)}</td><td>{formatBtc(order.original_qty)}</td><td>{formatBtc(order.filled_qty)}</td><td>{resultOrderStatus(order.exchange_status)}</td>
             <td>{canRequestCancel ? <button className="text-button" onClick={() => onCancel?.(order.client_order_id)} disabled={cancelRequested}>{cancelRequested ? "Checking…" : "Cancel offer"}</button> : "—"}</td></tr>;
         })}</tbody></table></div>}
       </section>
@@ -72,6 +72,20 @@ function resultOrderStatus(status: string): string {
     case "rejected": return "Not accepted";
     default: return "Not confirmed";
   }
+}
+
+function formatPrice(value: string): string {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0
+    ? `$${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`
+    : "Unavailable";
+}
+
+function formatBtc(value: string): string {
+  const amount = Number(value);
+  return /^\d+(?:\.\d+)?$/.test(value) && Number.isFinite(amount) && amount >= 0
+    ? `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 }).format(amount)} BTC`
+    : "Unavailable";
 }
 
 function qualityPercent(value: string): string { const parsed = Number(value); return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1e12 ? `${Math.round(parsed / 1e10)}%` : "Unavailable"; }

@@ -371,6 +371,7 @@ h1 em { font-style: normal; color: var(--lime); }
 }
 
 .score-as-of,.score-context,.solo-notice { color:var(--muted); font-size: 14px; line-height:1.5; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); clip-path:inset(50%); white-space:nowrap; border:0; }
 .maker-list { list-style:none; padding:0; margin:20px 0; }
 .maker-list li { display:flex; justify-content:space-between; gap:12px; padding:14px 0; border-top:1px solid var(--border-soft); font-size: 14px; }
 .maker-list strong { color:var(--lime); font-family:var(--mono); }
