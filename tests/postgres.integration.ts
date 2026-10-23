@@ -75,6 +75,21 @@ export async function runPostgresChecks() {
       await finalizeRoundResults(client, roundId, now + 196000);
       const final = (await client.query("SELECT total_scaled::text,verified_seconds::text,cleanup_state FROM round_results WHERE round_id=$1", [roundId])).rows[0];
       assert.deepEqual(final, { total_scaled: "416666666666", verified_seconds: "1", cleanup_state: "unresolved" }); checks++;
+      await client.query("UPDATE rounds SET status='completed' WHERE id=$1", [roundId]);
+      const nextAdmission = { ...admission, observedAt: now + 197_000 };
+      const nextParticipant = await enrollParticipant(client, otherSession, nextAdmission, rules, now + 197_000);
+      assert.notEqual(nextParticipant.roundId, roundId); checks++;
+      await client.query("UPDATE rounds SET status='active' WHERE id=$1", [nextParticipant.roundId]);
+      const nextRisk = { ...risk, requestedNotional: "100.04", price: "82000", size: "0.00122" };
+      const nextIntent = await issueQuoteIntent(client, otherSession, "buy", now + 213_000, nextRisk);
+      assert.notEqual(nextIntent.clientOrderId, intent.clientOrderId); checks++;
+      await assert.rejects(recordOrderObservation(client, { ...open, clientOrderId: intent.clientOrderId,
+        exchangeOrderId: "67890", price: nextRisk.price, size: nextRisk.size, lastVerifiedAt: now + 214_000 }), /terms do not match/); checks++;
+      const replay = await client.query(`SELECT qi.status, count(oo.intent_id)::int AS observations
+        FROM quote_intents qi LEFT JOIN order_observations oo ON oo.intent_id=qi.id
+        WHERE qi.id=(SELECT id FROM quote_intents WHERE client_order_id=$1)
+        GROUP BY qi.id`, [nextIntent.clientOrderId]);
+      assert.deepEqual(replay.rows[0], { status: "issued", observations: 0 }); checks++;
       throw new FixtureRollback();
     });
   } catch (error) { if (!(error instanceof FixtureRollback)) throw error; }
