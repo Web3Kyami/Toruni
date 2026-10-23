@@ -42,6 +42,8 @@ The service serves `dist/` and the API on port 4174 by default. Configure `APP_O
 
 The Vercel deployment serves the interface and the existing HTTP API through `api/[...path].ts`. Set `VITE_BUILDER_CODE`, `VITE_BUILDER_FEE_BPS`, and the server-only `DATABASE_URL` in the project environment. Sessions use the deployment's `VERCEL_URL` as their trusted origin unless `APP_ORIGIN` is configured for a custom domain. Client routes support direct navigation and refresh.
 
+The submitted preview at [toruni.vercel.app](https://toruni.vercel.app) was deployed without `DATABASE_URL`, so it cannot persist sessions or run live rounds. Vercel request handlers also do not run the continuous scoring worker. A playable deployment needs PostgreSQL and the Node service running continuously on a persistent host.
+
 The scoring worker runs through `npm run start:server` on a persistent Node host sharing the same database. It is not started inside Vercel request handlers. Vercel clients poll persisted observations; the persistent Node service retains its event stream. Keep round entry closed until the worker and the approved risk limits are configured.
 
 - `src/`: React interface, Builder Connect, browser-only Ed25519 signing, and testnet order adapters.
