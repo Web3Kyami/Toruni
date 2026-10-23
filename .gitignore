@@ -1,0 +1,30 @@
+# Supplied implementation blueprint and internal planning records
+/00-START-HERE.md
+/01-PRODUCT-DECISIONS.md
+/02-STRIKE-INTEGRATION.md
+/03-SCORING-AND-DATA.md
+/04-UX-AND-ARCHITECTURE.md
+/05-QA-DEMO-SUBMISSION.md
+/06-RESEARCH-NOTES.md
+/07-PROJECT-BRAIN-SNAPSHOT.md
+/08-DETAILED-UX-DESIGN.md
+/09-CLICK-MAP-AND-STATE-MATRIX.md
+/10-REFERENCES-AND-DESIGN-REVIEW.md
+/11-GPT6-XHIGH-IMPLEMENTER-HANDOFF.md
+/12-TESTNET-STARTER-CHECKLIST.md
+/AGENTS.md
+/TASKS.md
+/PROGRESS.md
+/.toruni/
+
+# Local secrets and generated files
+/.env
+/.env.*
+!/.env.example
+/node_modules/
+/dist/
+/build/
+/coverage/
+/playwright-report/
+/test-results/
+/screenshots/
