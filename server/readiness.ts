@@ -1,6 +1,7 @@
 import { readCurrentRound } from "./database.ts";
 import { STRIKE_TESTNET_ORIGIN } from "./strike.ts";
 import { writeFile } from "node:fs/promises";
+import { generateKeyPairSync } from "node:crypto";
 
 /** Development diagnostics only. Never an authorization or trading gate. */
 export async function checkReadiness() {
@@ -31,7 +32,26 @@ export async function checkReadiness() {
     }));
     await writeFile("/tmp/toruni-read-only-account-probes.json", JSON.stringify(probes, null, 2), { mode: 0o600 });
   }
-  return { environment: "strike-v2-testnet", strike, database };
+  let builderCodeProbe: { status: number | null; active: boolean | null } | undefined;
+  const builderCode = process.env.TORUNI_BUILDER_CODE_PROBE?.trim();
+  const address = probeAddresses[0];
+  if (builderCode) {
+    if (!address) builderCodeProbe = { status: null, active: null };
+    else {
+      try {
+        const publicKey = generateKeyPairSync("ed25519").publicKey
+          .export({ format: "der", type: "spki" }).subarray(-32).toString("hex");
+        const response = await fetch(new URL("/auth/builder/request-signature", STRIKE_TESTNET_ORIGIN), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ address, chain: "ethereum", code: builderCode, fee_share_bps: 0, public_key: publicKey }),
+          signal: AbortSignal.timeout(5_000),
+        });
+        builderCodeProbe = { status: response.status, active: response.ok };
+      } catch { builderCodeProbe = { status: null, active: null }; }
+    }
+  }
+  return { environment: "strike-v2-testnet", strike, database, ...(builderCodeProbe ? { builderCodeProbe } : {}) };
 }
 
 export async function checkOptionalL3() {

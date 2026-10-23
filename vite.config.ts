@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => {
   if (!process.env.TORUNI_MAX_QUOTE_NOTIONAL && local.TORUNI_MAX_QUOTE_NOTIONAL) process.env.TORUNI_MAX_QUOTE_NOTIONAL = local.TORUNI_MAX_QUOTE_NOTIONAL;
   if (!process.env.TORUNI_MAX_ACCOUNT_EXPOSURE && local.TORUNI_MAX_ACCOUNT_EXPOSURE) process.env.TORUNI_MAX_ACCOUNT_EXPOSURE = local.TORUNI_MAX_ACCOUNT_EXPOSURE;
   if (local.TORUNI_READ_ONLY_ACCOUNT_PROBES) process.env.TORUNI_READ_ONLY_ACCOUNT_PROBES = local.TORUNI_READ_ONLY_ACCOUNT_PROBES;
+  if (local.TORUNI_BUILDER_CODE_PROBE) process.env.TORUNI_BUILDER_CODE_PROBE = local.TORUNI_BUILDER_CODE_PROBE;
   return {
   plugins: [react(), {
     name: "toruni-development-api",
