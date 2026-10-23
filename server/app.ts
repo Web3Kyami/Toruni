@@ -47,7 +47,7 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
       if (url.pathname === "/api/rounds/current/join") {
         const accountId = body && typeof body === "object" && "accountId" in body && typeof body.accountId === "string" ? body.accountId : "";
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountId)) {
-          sendJson(response, 400, { error: "Connect and verify a Strike testnet account first." }); return;
+          sendJson(response, 400, { error: "Connect your wallet first." }); return;
         }
         const snapshot = await readMarketSnapshot("BTC-USD");
         if (!snapshot.mark || !snapshot.depth || !snapshot.marketRules || snapshot.unavailableSources.length) {
@@ -108,7 +108,7 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
       if (error instanceof RoundGuardError) { sendJson(response, error.status, { error: error.message }); return; }
       if (error instanceof StrikeReadError) {
         const status = error.status === 404 ? 404 : error.status === 409 ? 409 : 503;
-        sendJson(response, status, { error: status === 404 ? "Strike account was not found." : "Strike testnet data is unavailable. Refresh and try again." }); return;
+        sendJson(response, status, { error: status === 404 ? "Strike account was not found." : "Account details are unavailable. Try again shortly." }); return;
       }
       throw error;
     }
@@ -184,11 +184,11 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
         ? "Strike account was not found."
         : status === 409
           ? "Strike account identity could not be verified."
-          : "Strike testnet data is unavailable.";
+          : "Account details are unavailable. Try again shortly.";
       sendJson(response, status, { error: message });
       return;
     }
-    sendJson(response, 503, { error: url.pathname.startsWith("/api/rounds/") ? "Round service unavailable. Try again shortly." : "Strike testnet data is unavailable." });
+    sendJson(response, 503, { error: url.pathname.startsWith("/api/rounds/") ? "Round service unavailable. Try again shortly." : "Market data is unavailable." });
   }
 }
 

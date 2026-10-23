@@ -43,6 +43,18 @@ export async function runVisualReview(port) {
       socket.send(JSON.stringify({ id: requestId, method, params }));
     });
     const evaluate = async expression => { const response = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (response.exceptionDetails) throw new Error(response.exceptionDetails.text); return response.result.value; };
+    const auditVisibleText = () => evaluate(`(() => {
+      const visible = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && !el.closest('.sr-only,[aria-hidden="true"]');
+      const hasText = el => [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+      const below14 = [...document.querySelectorAll('body *')].filter(el => visible(el) && hasText(el) && parseFloat(getComputedStyle(el).fontSize) < 14)
+        .map(el => ({tag:el.tagName,text:el.textContent.trim().slice(0,60),font:getComputedStyle(el).fontSize}));
+      for (const input of document.querySelectorAll('input[placeholder]')) {
+        if (visible(input) && parseFloat(getComputedStyle(input,'::placeholder').fontSize) < 14) below14.push({tag:'INPUT::placeholder',text:input.placeholder,font:getComputedStyle(input,'::placeholder').fontSize});
+      }
+      const badge = document.querySelector('.network-badge')?.innerText ?? '';
+      const otherEnvironmentLabels = document.body.innerText.replace(badge,'').match(/\\b(testnet|mainnet|devnet|sandbox)\\b/gi) ?? [];
+      return {visibleTextCount:[...document.querySelectorAll('body *')].filter(el => visible(el) && hasText(el)).length,below14,otherEnvironmentLabels};
+    })()`);
     await call('Page.enable');
     const evidence = [];
     for (const width of [360, 390, 1440]) {
@@ -55,12 +67,25 @@ export async function runVisualReview(port) {
         if (!viewport?.includes('width=device-width')) throw new Error('Viewport declaration is missing.');
         const cors = await evaluate('fetch("https://api-v2-testnet.strikefinance.org/v2/time", {signal:AbortSignal.timeout(5000)}).then(r => r.status).catch(() => "blocked")');
         evidence.push({ route, width, publicStrikeBrowserCors: cors });
+        const copyAudit = await auditVisibleText();
+        if (copyAudit.below14.length) throw new Error('Visible text under 14px: '+JSON.stringify(copyAudit.below14));
+        if (copyAudit.otherEnvironmentLabels.length) throw new Error('Repeated environment labels: '+JSON.stringify(copyAudit.otherEnvironmentLabels));
+        evidence.push({ route, width, copyAudit });
         const label = route === '/' ? 'lobby' : route.startsWith('/arena') ? 'arena' : 'results-not-found';
         const capture = async name => {
           const shot = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: !["how", "rules", "wallet", "join", "risk", "orders"].includes(name) });
           await writeFile(`${output}/${name}-${width}.png`, Buffer.from(shot.data, 'base64'));
         };
         await capture(label);
+        if (route === '/') {
+          const reviewRect = await evaluate(`(() => {const button=[...document.querySelectorAll('.quote-button')].find(b => b.textContent.includes('Review bid'));if(!button)return null;button.scrollIntoView({block:'center',behavior:'instant'});const r=button.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
+          if (!reviewRect) throw new Error('Missing bid review action');
+          await call('Input.dispatchMouseEvent', {type:'mousePressed',...reviewRect,button:'left',clickCount:1});
+          await call('Input.dispatchMouseEvent', {type:'mouseReleased',...reviewRect,button:'left',clickCount:1});
+          const blocker = await evaluate('document.querySelector(".quote-notice")?.innerText?.trim()');
+          if (!blocker) throw new Error('A blocked offer review did not explain the next step after click');
+          evidence.push({screen:'blocked-offer-review',width,blocker});
+        }
         evidence.push({ route, width, viewport, horizontalOverflow: await evaluate('document.documentElement.scrollWidth > innerWidth'),
           heading: await evaluate('document.querySelector("h1")?.textContent'),
           font: await evaluate('getComputedStyle(document.body).fontFamily'),
@@ -82,7 +107,7 @@ export async function runVisualReview(port) {
             ['risk', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Margin and positions"))?.click()'],
             ['join', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Join challenge"))?.click()'],
             ['wallet', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Connect wallet"))?.click()'],
-            ['orders', 'document.querySelector("[aria-label=\\"Open order details\\"]")?.click()'],
+            ['orders', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Open order details"))?.click()'],
           ]) {
             const rect = await evaluate(`(() => {const button=${expression.replace('?.click()', '')}; if(!button) return null;button.scrollIntoView({block:'center',behavior:'instant'});const r=button.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
             if (!rect) throw new Error('Missing '+name+' action');
@@ -93,7 +118,10 @@ export async function runVisualReview(port) {
             await capture(name);
             const box = await evaluate(`(() => {const d=document.querySelector('[role=dialog]');const r=d.getBoundingClientRect();return {height:r.height,width:r.width,top:r.top,bottom:r.bottom,viewport:innerHeight,fontLoaded:document.fonts.check('500 16px "Plus Jakarta Sans"')}})()`);
             if(box.height < 240 || box.top < 0 || box.bottom > box.viewport+1) throw new Error('Collapsed or clipped '+name+' sheet: '+JSON.stringify(box));
-            evidence.push({screen:name,viewportWidth:width,...box});
+            const dialogCopyAudit = await auditVisibleText();
+            if (dialogCopyAudit.below14.length) throw new Error(name+' dialog has visible text under 14px: '+JSON.stringify(dialogCopyAudit.below14));
+            if (dialogCopyAudit.otherEnvironmentLabels.length) throw new Error(name+' dialog repeats environment labels: '+JSON.stringify(dialogCopyAudit.otherEnvironmentLabels));
+            evidence.push({screen:name,viewportWidth:width,...box,copyAudit:dialogCopyAudit});
             await call('Input.dispatchKeyEvent', { type:'keyDown', key:'Tab', code:'Tab', windowsVirtualKeyCode:9 });
             await call('Input.dispatchKeyEvent', { type:'keyUp', key:'Tab', code:'Tab', windowsVirtualKeyCode:9 });
             if (!await evaluate('document.querySelector("[role=dialog]")?.contains(document.activeElement)')) throw new Error('Focus left '+name+' dialog');

@@ -104,7 +104,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
   }, [kind]);
 
   const isConnect = kind === "connect";
-  const title = kind === "rules" ? "How scoring works" : kind === "how" ? "Make both sides count" : kind === "risk" ? "Margin and positions" : kind === "orders" ? "Your Toruni orders" : kind === "quote-review" ? `Review ${quoteReview?.side === "buy" ? "bid" : "ask"}` : "Connect to Strike testnet";
+  const title = kind === "rules" ? "How scoring works" : kind === "how" ? "Make both sides count" : kind === "risk" ? "Margin and positions" : kind === "orders" ? "Your offers" : kind === "quote-review" ? `Review ${quoteReview?.side === "buy" ? "bid" : "ask"}` : "Connect wallet";
   if (!kind) return null;
   return createPortal(
     <div className={`dialog-overlay ${isConnect || kind === "risk" ? "dialog-overlay--side" : ""}`} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
@@ -118,8 +118,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
       if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     }}>
-      <div className="modal-topline"><span>TORUNI · STRIKE V2 TESTNET</span><button className="icon-button" onClick={onClose} aria-label="Close dialog">×</button></div>
-      <h2 id="dialog-title">{title}</h2>
+      <div className="modal-heading"><h2 id="dialog-title">{title}</h2><button className="icon-button" onClick={onClose} aria-label="Close dialog">×</button></div>
       {kind === "rules" && <div className="modal-copy">
         <p>Earn points by keeping buy and sell offers close to the market price.</p>
         <ul><li>Closer offers earn more. Offers 0.5% or more from the market earn no points.</li><li>Keep an offer open for five seconds before it starts scoring.</li><li>Keep both a buy and a sell offer open to earn a two-sided bonus.</li><li>Scoring pauses when current market or account information is unavailable.</li></ul>
@@ -133,33 +132,32 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
       </div>}
       {kind === "orders" && <OrderRecords orders={orders} current={ordersCurrent} onCancel={onCancelOrder} canCancel={canCancelOrders} cancelingOrderIds={cancelingOrderIds} />}
       {kind === "quote-review" && quoteReview && <div className="connect-flow quote-review">
-        <p>Review the exact offer before it is sent to Strike testnet.</p>
+        <p>Review this offer before sending it to Strike.</p>
         <div className="balance-row"><span>Side</span><strong>{quoteReview.side === "buy" ? "Buy · bid" : "Sell · ask"}</strong></div>
         <div className="balance-row"><span>Price</span><strong>${formatPrice(quoteReview.price)}</strong></div>
         <div className="balance-row"><span>Size</span><strong>{quoteReview.size} BTC</strong></div>
         <div className="balance-row"><span>Order value</span><strong>${quoteReview.notional}</strong></div>
-        <p className="modal-note">This offer will rest on the market instead of filling immediately. It stays open until it fills or you cancel it. A fill can create a position.</p>
-        <p className="risk-warning">Toruni checks the order status independently. A submitted order is not counted as open until Strike confirms it.</p>
+        <p className="risk-warning">This offer rests on the market. If filled, it opens a position. Canceling it does not close that position.</p>
         <button className="button button--primary button--wide" onClick={onSubmitQuote} disabled={!canWriteOrders || quoteSubmitting}>
-          {quoteSubmitting ? "Sending to Strike…" : "Place testnet order"}<Icon name="arrow" />
+          {quoteSubmitting ? "Sending to Strike…" : "Place offer"}<Icon name="arrow" />
         </button>
       </div>}
       {kind === "risk" && <div className="connect-flow">
         {riskLoading && <p role="status">Checking Strike account data…</p>}
         {riskError && <p className="inline-error" role="alert">{riskError}</p>}
-        {!account && <p>Connect a wallet and check its Strike testnet account to view margin and positions.</p>}
-        {risk && <><div className="balance-row"><span>Available balance</span><strong>{risk.account.available_balance}</strong></div><p className="metric-sub">Observed {new Date(risk.observedAt).toLocaleTimeString()}</p>
-          <h3>Open positions</h3>{risk.positions.length === 0 ? <p>No open positions were returned by Strike.</p> : <ul className="position-list">{risk.positions.map((position, index) => <li key={`${position.symbol}-${index}`}><strong>{position.symbol}</strong><span>Size {position.size}</span><span>{position.leverage}x · {position.marginMode}</span></li>)}</ul>}
-          <p className="modal-note">BTC leverage: {risk.account.symbolSettings?.["BTC-USD"]?.leverage !== undefined ? `${risk.account.symbolSettings["BTC-USD"].leverage}x` : "Not verified"}. Toruni requires 1x leverage before new game quotes.</p></>}
+        {!account && <p>Connect to view your balance and positions.</p>}
+        {risk && <><div className="balance-row"><span>Available balance</span><strong>{risk.account.available_balance}</strong></div>
+          <h3>Open positions</h3>{risk.positions.length === 0 ? <p>No open positions.</p> : <ul className="position-list">{risk.positions.map((position, index) => <li key={`${position.symbol}-${index}`}><strong>{position.symbol}</strong><span>Size {position.size}</span><span>{position.leverage}x · {position.marginMode}</span></li>)}</ul>}
+          <p className="modal-note">Leverage: {risk.account.symbolSettings?.["BTC-USD"]?.leverage !== undefined ? `${risk.account.symbolSettings["BTC-USD"].leverage}x` : "Unavailable"}. Toruni requires 1x to play.</p></>}
         {account && <button className="button button--ghost button--wide" onClick={onRiskRefresh} disabled={riskLoading}>Refresh account and positions</button>}
-        <p className="risk-warning">Canceling an order does not close a filled position. Toruni does not automatically close positions.</p>
+        <p className="risk-warning">Canceling an offer will not close a position created by a fill.</p>
       </div>}
       {isConnect && <div className="connect-flow">
         {stage === "connected" && address && <div className="connected-summary">
-          <StatusPill state="live">WALLET AUTHORIZED</StatusPill>
+          <StatusPill state="live">CONNECTED</StatusPill>
           <p className="wallet-address"><Icon name="wallet" size={17} />{shortAddress(address)}</p>
           {account ? <div className="balance-row"><span>Available balance</span><strong>{account.available_balance}</strong></div> : <p className="inline-error" role="status"><Icon name="alert" size={17} />Your wallet is authorized, but the balance is unavailable. Check again shortly.</p>}
-          <p className="modal-note">Keep this tab open to stay connected. Your Strike balance must be confirmed before you can join.</p>
+          <p className="modal-note">Keep this tab open. Your balance must be confirmed before you can join.</p>
           {error && <p className="inline-error" role="status">{error}</p>}
           {stage === "connected" && account && <button className="button button--ghost button--wide" onClick={onRiskRefresh} disabled={riskLoading}>
             {riskLoading ? "Refreshing account…" : "Refresh balance and positions"}
@@ -171,34 +169,34 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
           {joinError && <p className="inline-error" role="alert">{joinError}</p>}
         </div>}
         {stage === "unknown" && <div className="unknown-auth">
-          <StatusPill state="paused">AUTHORIZATION STATUS UNKNOWN</StatusPill>
-          <p>Your approval may have succeeded. Check its status before approving again; a new approval replaces the previous connection.</p>
-          <p className="modal-note">No order or deposit was submitted. Keep this tab open while we check your connection.</p>
-          <button className="button button--primary button--wide" onClick={onReconcile} disabled={recovering}>{recovering ? "Checking authorization…" : "Check authorization status"}</button>
+          <StatusPill state="paused">APPROVAL UNCLEAR</StatusPill>
+          <p>Your approval may have succeeded. Check its status before approving again.</p>
+          <p className="modal-note">No offer or deposit was sent.</p>
+          <button className="button button--primary button--wide" onClick={onReconcile} disabled={recovering}>{recovering ? "Checking…" : "Check approval"}</button>
           {error && <p className="inline-error" role="alert">{error}</p>}
         </div>}
         {stage !== "connected" && stage !== "unknown" && <>
-          <p>Connect your wallet to check your Strike testnet balance. Connecting does not place orders or move funds.</p>
+          <p>Connect your wallet to view your balance. This will not place an offer or move funds.</p>
           {stage === "account-found" && <div className="account-found"><StatusPill state="live">ACCOUNT FOUND</StatusPill><span>{address ? shortAddress(address) : ""}</span></div>}
           {stage === "new-account" && <div className="account-found account-found--new"><StatusPill state="waiting">NO ACCOUNT FOUND</StatusPill><span>Strike may create one after you approve its message.</span></div>}
           {address && <p className="wallet-address"><Icon name="wallet" size={17} />{shortAddress(address)}</p>}
           {error && <p className="inline-error" role="alert"><Icon name="alert" size={17} />{error}</p>}
           {stage === "idle" && <button className="button button--primary button--wide" onClick={onLookup} disabled={!getBuilderCode()}>
-            <Icon name="wallet" />{getBuilderCode() ? "Connect wallet and check account" : "Builder code required"}<Icon name="arrow" />
+            <Icon name="wallet" />{getBuilderCode() ? "Connect wallet" : "Wallet unavailable"}<Icon name="arrow" />
           </button>}
           {stage === "account-found" && <>
-            <div className="authorization-notice"><Icon name="shield" size={18} /><span>Approve Toruni in your wallet. Toruni adds <b>no extra trading fee</b>. This replaces any previous Toruni authorization. Your approval does not place an order or deposit funds.</span></div>
+            <div className="authorization-notice"><Icon name="shield" size={18} /><span>Toruni adds no fee. Strike’s trading fees may apply. This replaces any prior Toruni approval. Approval does not place an offer or deposit funds.</span></div>
             <button className="button button--primary button--wide" onClick={onAuthorize}>
               Authorize Toruni on Strike <Icon name="arrow" />
             </button>
           </>}
           {stage === "new-account" && <>
-            <div className="authorization-notice"><Icon name="shield" size={18} /><span>Your approval lets Strike set up access for Toruni, with <b>no extra Toruni trading fee</b>. It does not place an order or deposit funds.</span></div>
+            <div className="authorization-notice"><Icon name="shield" size={18} /><span>Toruni adds no fee. Strike’s trading fees may apply. Approval does not place an offer or deposit funds.</span></div>
             <button className="button button--primary button--wide" onClick={onAuthorize}>
               Continue to wallet signature <Icon name="arrow" />
             </button>
           </>}
-          {stage === "checking-account" && <div className="progress-line"><span className="spinner" />Checking Strike testnet…</div>}
+          {stage === "checking-account" && <div className="progress-line"><span className="spinner" />Checking account…</div>}
           {stage === "authorizing" && <div className="progress-line"><span className="spinner" />Waiting for wallet approval…</div>}
           {!getBuilderCode() && <p className="modal-note">Wallet connection is unavailable. You can still explore the arena.</p>}
         </>}
@@ -228,7 +226,7 @@ export function App() {
   const [tab, setTab] = useState<Tab>("quotes");
   const [market, setMarket] = useState<MarketSnapshot | null>(null);
   const [marketState, setMarketState] = useState<MarketState>("checking");
-  const [marketMessage, setMarketMessage] = useState("Checking Strike testnet data");
+  const [marketMessage, setMarketMessage] = useState("Checking market data");
   const [connectStage, setConnectStage] = useState<ConnectStage>("idle");
   const [walletAddress, setWalletAddress] = useState("");
   const [account, setAccount] = useState<PublicStrikeAccount | null>(null);
@@ -257,7 +255,7 @@ export function App() {
       if (result.account.account_id !== accountId) throw new Error("The returned account did not match your selected wallet.");
       setRisk(result);
       return result;
-    } catch { setRisk(null); setRiskError("Strike account and position data is unavailable. Refresh before making another decision."); }
+    } catch { setRisk(null); setRiskError("Account and position details are unavailable. Refresh before continuing."); }
     finally { setRiskLoading(false); }
     return null;
   };
@@ -296,17 +294,17 @@ export function App() {
       setMarket(snapshot);
       if (snapshot.unavailableSources.length === 0) {
         setMarketState("live");
-        setMarketMessage("Strike testnet data live");
+        setMarketMessage("Market data live");
       } else if (snapshot.unavailableSources.length < 3) {
         setMarketState("partial");
-        setMarketMessage(`Partial feed · ${snapshot.unavailableSources.join(", ")} unavailable`);
+        setMarketMessage("Some market data is unavailable. Offers are paused.");
       } else {
         setMarketState("offline");
-        setMarketMessage("Strike testnet data unavailable · scoring paused");
+        setMarketMessage("Market data unavailable. Offers are paused.");
       }
     } catch {
       setMarketState("offline");
-      setMarketMessage("Strike testnet data unavailable · scoring paused");
+      setMarketMessage("Market data unavailable. Offers are paused.");
     }
   }, []);
 
@@ -381,7 +379,7 @@ export function App() {
         void refreshRisk(verifiedAccount.account_id);
       } catch (readError) {
         setAccount(null);
-        setConnectError(readError instanceof Error ? `Builder authorization succeeded. ${readError.message}` : "Builder authorization succeeded, but the public account read is unavailable.");
+        setConnectError("Toruni was approved, but account details could not be loaded. Refresh them before approving again.");
       }
     } catch (error) {
       setConnectStage(isBuilderAuthorizationUncertain() ? "unknown" : account ? "account-found" : "new-account");
@@ -442,9 +440,9 @@ export function App() {
     && Number(risk.account.available_balance) >= Number(gamePolicy?.requiredCollateral ?? Infinity)
     && !participantJoined && (!round || round.status === "lobby"));
   const joinBlockReason = !sessionReady
-    ? sessionError || "Preparing a secure session…"
+    ? sessionError ? "Connection unavailable. Refresh the page." : "Preparing your connection…"
     : !liveAccount
-      ? "Connect and authorize your Strike testnet account first."
+      ? "Connect your wallet first."
       : !policyReady
         ? "The challenge limits are still being prepared. You can explore the market meanwhile."
         : !riskFresh
@@ -464,13 +462,13 @@ export function App() {
     && round?.status === "active" && roundData.health === "current" && risk && risk.account.symbolSettings?.["BTC-USD"]?.leverage === 1
     && !sideBusy(side));
   const quoteBlockReason = !sessionReady
-    ? sessionError || "Preparing a secure session…"
+    ? sessionError ? "Connection unavailable. Refresh the page." : "Preparing your connection…"
     : !liveAccount
-      ? "Connect and verify your Strike testnet account first."
+      ? "Connect your wallet first."
       : !policyReady
         ? "Challenge limits are not ready yet."
         : currentMarketState !== "live"
-          ? "Strike market data is unavailable. Quote review is paused."
+          ? "Market data is unavailable."
         : !participantJoined
           ? "Join the challenge to review quotes."
           : round?.status !== "active"
@@ -538,9 +536,9 @@ export function App() {
     setOrderActionMessage("");
     try {
       await cancelToruniOrder({ clientOrderId: order.client_order_id, exchangeOrderId: order.exchange_order_id, symbol: "BTC-USD" });
-      setOrderActionMessage("Cancellation requested. Waiting for Strike to confirm the final status.");
+      setOrderActionMessage("Cancel request sent. Checking status.");
     } catch {
-      setOrderActionMessage("Cancellation could not be confirmed. Toruni is checking the order status; do not repeat the request yet.");
+      setOrderActionMessage("Cancel was not confirmed. Check the order status before trying again.");
     }
   };
 
@@ -556,11 +554,12 @@ export function App() {
         <span className="topbar-context">LIQUIDITY ARENA <span className="topbar-dot">·</span> BTC-USD</span>
         <div className="topbar-spacer" />
         <StatusPill state={currentMarketState === "live" ? "live" : currentMarketState === "checking" ? "waiting" : "paused"}>
-          {currentMarketState === "live" ? "TESTNET LIVE" : currentMarketState === "checking" ? "CONNECTING" : "SCORING PAUSED"}
+          {currentMarketState === "live" ? "LIVE DATA" : currentMarketState === "checking" ? "CONNECTING" : "PAUSED"}
         </StatusPill>
-        <button className="button button--connect" onClick={openConnect}>
+        <button className="button button--connect" onClick={openConnect} aria-label={liveAccount ? `Connected wallet ${shortAddress(walletAddress)}` : "Connect wallet"}>
           <Icon name="wallet" size={17} />
-          {liveAccount ? shortAddress(walletAddress) : "Connect wallet"}
+          <span className="connect-label-full">{liveAccount ? shortAddress(walletAddress) : "Connect wallet"}</span>
+          <span className="connect-label-short" aria-hidden="true">{liveAccount ? shortAddress(walletAddress) : "Connect"}</span>
         </button>
       </header>
 
@@ -569,11 +568,10 @@ export function App() {
           myOrders={roundData.participant?.roundId === resultsRoundId ? roundData.orders : []}
           canCancel={liveAccount} cancelingOrderIds={cancelingOrderIds}
           onCancel={clientOrderId => { const order = roundData.orders.find(item => item.client_order_id === clientOrderId); if (order) void cancelObservedOrder(order); }} /> : <>
-        {pathname === "/arena" ? <section className="arena-heading"><div><span className="panel-kicker">BTC-USD · STRIKE V2 TESTNET</span><h1>The liquidity arena</h1></div><button className="button button--ghost" onClick={() => navigate("/")}>Back to lobby</button></section> : <section className="intro-row">
+        {pathname === "/arena" ? <section className="arena-heading"><div><span className="panel-kicker">BTC-USD</span><h1>The liquidity arena</h1></div><button className="button button--ghost" onClick={() => navigate("/")}>Back to lobby</button></section> : <section className="intro-row">
           <div>
             <div className="eyebrow"><span className="eyebrow-line" />THE MARKET NEEDS MAKERS</div>
             <h1>Anyone can bet on the market.<br /><em>Can you make the market?</em></h1>
-            <p className="intro-copy">Keep genuine testnet buy and sell quotes close to the mark. Verified liquidity earns points.</p>
           </div>
           <div className="intro-actions">
             <button className="button button--ghost" onClick={explore}>Explore live arena <Icon name="arrow" size={16} /></button>
@@ -582,13 +580,12 @@ export function App() {
           </div>
         </section>}
 
-        <div className={`feed-banner feed-banner--${currentMarketState}`} role="status" aria-live="polite">
-          <span className="feed-banner-icon"><Icon name={currentMarketState === "live" ? "check" : "alert"} size={16} /></span>
-          <span>{currentMarketState === "offline" && marketState === "live" ? "Strike market data is stale · scoring paused" : marketMessage}</span>
-          <span className="feed-banner-time">{market?.mark ? `MARK OBSERVED ${new Date(market.mark.observedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "NO MARK OBSERVED"}</span>
-        </div>
+        {currentMarketState !== "live" && currentMarketState !== "checking" && <div className={`feed-banner feed-banner--${currentMarketState}`} role="status" aria-live="polite">
+          <span className="feed-banner-icon"><Icon name="alert" size={16} /></span>
+          <span>{marketMessage}</span>
+        </div>}
 
-        <div className="mobile-score-strip"><span>{roundData.health === "unavailable" ? "Server updates unavailable" : round ? round.status.replaceAll("_", " ") : "Spectating"}</span><strong>Your score {roundData.participant?.score ?? "—"}</strong></div>
+        <div className="mobile-score-strip"><span>{roundData.health === "unavailable" ? "Updates unavailable" : round ? round.status.replaceAll("_", " ") : "Spectating"}</span><strong>Your score {roundData.participant?.score ?? "—"}</strong></div>
         <nav className="mobile-tabs" aria-label="Arena sections">
           {(["quotes", "market", "standings"] as Tab[]).map((item) => <button key={item} className={tab === item ? "mobile-tab is-active" : "mobile-tab"} onClick={() => setTab(item)} aria-pressed={tab === item}>{item}</button>)}
         </nav>
@@ -600,53 +597,47 @@ export function App() {
               <span className="market-icon">₿</span>
             </div>
             <div className="mark-block">
-              <span className="metric-label">STRIKE MARK <span className="help-dot" title="Strike mark price is the reference Toruni uses to grade quote proximity.">?</span></span>
+              <span className="metric-label">MARK PRICE</span>
               <strong className="mark-value">{markPrice ? `$${formatPrice(markPrice)}` : "—"}</strong>
-              <span className="metric-sub">{markPrice ? "Strike testnet" : "Waiting for a live Strike mark"}</span>
             </div>
             <div className="book-heading"><span>TOP OF BOOK</span><span>PRICE <small>·</small> SIZE</span></div>
             {market?.depth ? <div className="book-table">
               <div className="book-side book-side--ask"><span>ASK</span><strong>{ask ? `$${formatPrice(ask.price)}` : "—"}</strong><small>{ask?.size ?? "—"}</small></div>
               <div className="book-mid"><i /><span>MARK</span><i /></div>
               <div className="book-side book-side--bid"><span>BID</span><strong>{bid ? `$${formatPrice(bid.price)}` : "—"}</strong><small>{bid?.size ?? "—"}</small></div>
-            </div> : <div className="book-empty"><span className="book-empty-line"><i /><i /><i /><i /><i /></span><p>{currentMarketState === "offline" ? "Book unavailable" : "Waiting for Strike depth"}</p></div>}
-            <div className="market-foot"><span><i className="source-dot" />SOURCE</span><strong>{market?.depth ? "Strike V2 testnet" : "Not verified"}</strong></div>
-            <div className="market-foot"><span>MARKET LIMITS</span><strong>{market?.marketRules ? "Received" : "Unavailable"}</strong></div>
+            </div> : <div className="book-empty"><span className="book-empty-line"><i /><i /><i /><i /><i /></span><p>{currentMarketState === "offline" ? "Order book unavailable" : "Loading order book"}</p></div>}
             <button className="text-button" onClick={refreshMarket}>Refresh live data <Icon name="arrow" size={14} /></button>
           </aside>
 
           <section className={`center-column ${tab !== "quotes" ? "mobile-hidden" : ""}`}>
             <div className="round-card panel">
               <div className="round-left">
-                <span className="panel-kicker">{round ? round.status.replaceAll("_", " ") : "NEXT CHALLENGE NOT SCHEDULED"}</span>
+                <span className="panel-kicker">{round ? round.status.replaceAll("_", " ") : "NO ROUND SCHEDULED"}</span>
                 <div className="round-title-row"><h2>Two sides. One score.</h2><span className="round-length"><Icon name="clock" size={14} /> {countdown ?? "180 SEC"}</span></div>
-                <p>Three minutes. Keep both sides competitive.</p>
               </div>
               <button className="button button--join" onClick={() => {
                 if (!liveAccount) openConnect();
                 else if (participantJoined) { navigate("/arena"); setTab("quotes"); }
                 else if (canJoinRound) void beginJoin();
                 else setNotice(joinBlockReason);
-              }} disabled={!getBuilderCode() || joining} title={!getBuilderCode() ? "Toruni needs an active Strike builder code before wallet authorization." : joinBlockReason}>
+              }} disabled={!getBuilderCode() || joining}>
                 {joining ? "Joining…" : participantJoined ? "Open arena" : "Join challenge"} <Icon name="arrow" size={16} />
               </button>
             </div>
 
             <div className="quote-section-heading">
-              <div><span className="panel-kicker">YOUR QUOTES</span><h2>Build the spread</h2></div>
-              <StatusPill state={currentMarketState === "live" ? "waiting" : "paused"}>{currentMarketState !== "live" ? "SCORING PAUSED" : round?.status === "active" ? "ROUND ACTIVE" : "NO ACTIVE ROUND"}</StatusPill>
+                <div><h2>Your offers</h2></div>
+              <StatusPill state={currentMarketState === "live" ? "waiting" : "paused"}>{currentMarketState !== "live" ? "PAUSED" : round?.status === "active" ? "ACTIVE" : "WAITING"}</StatusPill>
             </div>
             <div className="quote-grid">
               {(["buy", "sell"] as const).map(side => {
                 const order = [...roundData.orders].reverse().find(item => item.side === side);
-                const sideBusyNow = sideBusy(side);
                 const status = order?.verification_error ? "CHECKING" : order?.exchange_status?.toUpperCase()
                   ?? (participantJoined ? "READY" : "NOT JOINED");
                 const statusState = order?.exchange_status === "open" ? "live" as const
                   : order?.verification_error || order?.intent_status === "issued" || order?.intent_status === "submitted" ? "waiting" as const
                     : "paused" as const;
                 return <QuoteCard key={side} side={side === "buy" ? "bid" : "ask"} markPrice={markPrice} value={quoteDrafts[side]}
-                  blockReason={sideBusyNow ? "Resolve the existing offer before creating another." : quoteBlockReason}
                   status={status} statusState={statusState} canReview={canReviewQuote(side)}
                   onChange={(field, value) => setQuoteDrafts(previous => ({ ...previous, [side]: { ...previous[side], [field]: value } }))}
                   onReview={() => void reviewQuote(side)} />;
@@ -654,12 +645,11 @@ export function App() {
             </div>
             {notice && <p className="quote-notice" role="status"><Icon name="alert" size={15} />{notice}</p>}
             {orderActionMessage && <p className="quote-notice" role="status"><Icon name="alert" size={15} />{orderActionMessage}</p>}
-            <p className="quote-safety"><Icon name="shield" size={15} />Offers stay open until filled or canceled. An offer that would trade immediately is rejected.</p>
 
             <div className="lower-grid lower-grid--orders">
 
               <section className={`panel order-panel ${tab === "standings" ? "mobile-show" : ""}`}>
-                <div className="panel-heading panel-heading--compact"><div><span className="panel-kicker">MY ORDERS</span><h2>Order status</h2></div><button className="icon-button icon-button--subtle" onClick={() => setDialog("orders")} aria-label="Open order details"><Icon name="arrow" size={16} /></button></div>
+                <div className="panel-heading panel-heading--compact"><h2>Your offers</h2></div>
                 <OrderRecords orders={roundData.orders} current={roundData.health === "current"} onCancel={cancelObservedOrder} canCancel={liveAccount} cancelingOrderIds={cancelingOrderIds} />
                 <button className="text-button" onClick={() => setDialog("orders")}>Open order details <Icon name="arrow" size={14} /></button>
                 <button className="text-button risk-access" onClick={() => { setDialog("risk"); void refreshRisk(); }}>Margin and positions <Icon name="shield" size={14} /></button>
@@ -670,13 +660,8 @@ export function App() {
           <aside className={`right-column ${tab !== "standings" ? "mobile-hidden" : ""}`}>
             <ScorePanel data={roundData} now={serverNow} />
             <StandingsPanel data={roundData} />
-            <section className="panel trust-panel">
-              <div className="trust-icon"><Icon name="shield" size={17} /></div>
-              <div><strong>Open offers earn points</strong><p>Keep your offers open and close to the market.</p></div>
-              <button className="icon-button icon-button--subtle" onClick={() => setDialog("rules")} aria-label="Read verification rules"><Icon name="arrow" size={15} /></button>
-            </section>
             <section className="panel activity-panel">
-              <div className="panel-heading panel-heading--compact"><div><span className="panel-kicker">ROUND FEED</span><h2>Recent activity</h2></div><span className="feed-live-label">{roundData.health !== "current" ? "PAUSED" : roundData.round ? "LATEST UPDATES" : "AWAITING ROUND"}</span></div>
+                <div className="panel-heading panel-heading--compact"><h2>Recent activity</h2></div>
               <OrderRecords orders={roundData.orders.filter(order => order.observed_at).slice(0, 4)} current={roundData.health === "current"} activity onCancel={cancelObservedOrder} canCancel={liveAccount} cancelingOrderIds={cancelingOrderIds} />
             </section>
           </aside>
@@ -685,7 +670,7 @@ export function App() {
         </>}
         <footer className="app-footer">
           <div className="footer-brand"><span className="brand-mark brand-mark--small"><i /><i /><b /></span><span>TORUNI</span><small>Liquidity, made visible.</small></div>
-          <div className="footer-links"><button onClick={() => setDialog("rules")}>Rules & scoring</button><button onClick={() => setDialog("how")}>How to play</button><span>STRIKE FINANCE · V2 TESTNET</span></div>
+          <div className="footer-links"><button onClick={() => setDialog("rules")}>Rules & scoring</button><button onClick={() => setDialog("how")}>How to play</button></div>
         </footer>
       </main>
 
@@ -728,16 +713,15 @@ export function App() {
   );
 }
 
-function QuoteCard({ side, markPrice, blockReason, onReview, value, onChange, canReview, status, statusState }: {
+function QuoteCard({ side, markPrice, onReview, value, onChange, status, statusState, canReview }: {
   side: "bid" | "ask";
   markPrice: string | null;
-  blockReason: string;
   onReview: () => void;
   value: { price: string; size: string };
   onChange: (field: "price" | "size", value: string) => void;
-  canReview: boolean;
   status: string;
   statusState: "live" | "waiting" | "paused";
+  canReview: boolean;
 }) {
   const isBid = side === "bid";
   return <article className={`quote-card panel quote-card--${side}`}>
@@ -749,11 +733,9 @@ function QuoteCard({ side, markPrice, blockReason, onReview, value, onChange, ca
       <label>PRICE <span>USD</span><div className="input-shell"><span>$</span><input aria-label={`${isBid ? "Bid" : "Ask"} price`} inputMode="decimal" placeholder={markPrice ? "Enter price" : "Waiting for mark"} value={value.price} onChange={event => onChange("price", event.target.value)} disabled={!canReview} /></div></label>
       <label>SIZE <span>BTC</span><div className="input-shell"><input aria-label={`${isBid ? "Bid" : "Ask"} size`} inputMode="decimal" placeholder="Enter size" value={value.size} onChange={event => onChange("size", event.target.value)} disabled={!canReview} /><span>BTC</span></div></label>
     </div>
-    <div className="quote-meta"><span><Icon name="shield" size={14} />Resting offers only</span></div>
-    <button className={`button quote-button quote-button--${side}`} onClick={onReview} disabled={!canReview}>
+    <button className={`button quote-button quote-button--${side}`} onClick={onReview}>
       Review {isBid ? "bid" : "ask"} <Icon name="arrow" size={15} />
     </button>
-    {!canReview && <p className="quote-disabled-reason" title={blockReason}><Icon name="alert" size={13} />{blockReason}</p>}
   </article>;
 }
 
@@ -761,15 +743,15 @@ function OrderRecords({ orders, current, activity = false, onCancel, canCancel, 
   orders: ObservedOrder[]; current: boolean; activity?: boolean; onCancel: (order: ObservedOrder) => void;
   canCancel: boolean; cancelingOrderIds: Set<string>;
 }) {
-  if (!orders.length) return <div className="empty-orders"><p>{!current ? "Order status is unavailable" : activity ? "Waiting for verified activity" : "No Toruni orders in this session"}</p><small>{!current ? "Checking again automatically. No order is assumed closed." : "Only confirmed open offers earn points."}</small></div>;
-  return <div className="order-records">{!current && <p role="status">Updates paused. These are the last observed statuses.</p>}{orders.map(order => <article className="order-record" key={order.client_order_id}>
+  if (!orders.length) return <div className="empty-orders"><p>{!current ? "Order status unavailable. Offers may still be open." : activity ? "No recent activity" : "No offers yet"}</p></div>;
+  return <div className="order-records">{!current && <p role="status">Order status unavailable. Offers may still be open.</p>}{orders.map(order => <article className="order-record" key={order.client_order_id}>
     <div><strong>{order.side === "buy" ? "Bid" : "Ask"}</strong><span>{readableOrderStatus(order)}</span></div>
-    <p>{order.price ? `$${formatPrice(order.price)}` : "Price not verified"} · {order.original_qty ?? "Unverified"} BTC</p>
-    <small>{order.filled_qty === null ? "Filled size not verified" : `${order.filled_qty} BTC filled`}{order.observed_at ? ` · Observed ${new Date(order.observed_at).toLocaleTimeString()}` : ""}</small>
-    {!activity && <><code>{order.exchange_order_id || order.client_order_id}</code>
+    <p>{order.price ? `$${formatPrice(order.price)}` : "Price pending"} · {order.original_qty ?? "—"} BTC</p>
+    <small>{order.filled_qty === null ? "Fill details pending" : `${order.filled_qty} BTC filled`}</small>
+    {!activity && <>
       {order.exchange_status === "open" && <button className="text-button order-cancel" onClick={() => onCancel(order)}
         disabled={!canCancel || !/^[1-9]\d{0,18}$/.test(order.exchange_order_id ?? "") || cancelingOrderIds.has(order.client_order_id)}>
-        {cancelingOrderIds.has(order.client_order_id) ? "Cancellation requested · checking" : "Request cancellation"}
+        {cancelingOrderIds.has(order.client_order_id) ? "Checking cancellation…" : "Cancel offer"}
       </button>}
       {Number(order.filled_qty ?? 0) > 0 && <small className="order-risk-note">A fill may have created a position. Check Margin and positions.</small>}
     </>}
@@ -777,15 +759,15 @@ function OrderRecords({ orders, current, activity = false, onCancel, canCancel, 
 }
 
 function readableOrderStatus(order: ObservedOrder): string {
-  if (order.verification_error) return "Checking with Strike";
+  if (order.verification_error) return "Checking status";
   switch (order.exchange_status) {
     case "open": return "Resting on Strike";
-    case "pending": return "Waiting for Strike";
+    case "pending": return "Waiting for confirmation";
     case "filled": return "Filled";
     case "canceled": return "Canceled";
     case "expired": return "Expired";
     case "rejected": return "Not accepted";
     case "unknown": return "Not confirmed yet";
-    default: return "Checking with Strike";
+    default: return "Checking status";
   }
 }

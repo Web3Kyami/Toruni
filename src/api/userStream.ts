@@ -24,7 +24,7 @@ export interface UserStreamCallbacks {
 
 const socketUrl = `${STRIKE_API_ORIGIN.replace(/^https:/, "wss:")}/ws/user-api`;
 if (new URL(socketUrl).origin !== "wss://api-v2-testnet.strikefinance.org") {
-  throw new Error("Toruni user updates are restricted to Strike V2 testnet.");
+  throw new Error("Order updates are unavailable.");
 }
 
 const AUTH_CLOSE_CODES = new Set([1008, 4001, 4003, 4401, 4403]);

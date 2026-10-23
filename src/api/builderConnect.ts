@@ -63,7 +63,7 @@ export function getBuilderCode(): string | null {
 
 function getBuilderFeeBps(): number {
   const fee = import.meta.env.VITE_BUILDER_FEE_BPS?.trim() ?? "0";
-  if (fee !== "0") throw new Error("This Toruni build requires a 0 bps builder fee.");
+  if (fee !== "0") throw new Error("Toruni connection is unavailable right now.");
   return 0;
 }
 
@@ -122,9 +122,9 @@ export async function authorizeBuilderConnect(
 ): Promise<BuilderConnectResponse> {
   if (authorizationUncertain) throw new Error("Reconcile the previous authorization before requesting another signature.");
   if (authorizationInProgress) throw new Error("A wallet authorization is already in progress.");
-  if (currentSession) throw new Error("Toruni already has an authorized API wallet in this tab.");
+  if (currentSession) throw new Error("Toruni is already connected in this tab.");
   const code = getBuilderCode();
-  if (!code) throw new Error("Toruni's active Strike builder code has not been configured.");
+  if (!code) throw new Error("Toruni connection is unavailable right now.");
   const feeBps = getBuilderFeeBps();
   authorizationInProgress = true;
   const revision = sessionRevision;
@@ -188,12 +188,12 @@ export async function authorizeBuilderConnect(
       || result.builder_code !== code || result.fee_share_bps !== feeBps) {
       authorizationUncertain = true;
       recoveryReadAllowed = false;
-      throw new Error("Strike's authorization response did not match the generated API wallet.");
+      throw new Error("Strike could not confirm this approval. Check it before continuing.");
     }
 
     if (revision !== sessionRevision) {
       authorizationUncertain = true; recoveryReadAllowed = false;
-      throw new Error("Wallet selection changed during authorization. Review the API wallet in Strike before continuing.");
+      throw new Error("Wallet selection changed during approval. Check your Strike approval before continuing.");
     }
     currentSession = {
       accountId: result.account_id,
@@ -214,11 +214,11 @@ export async function authorizeBuilderConnect(
 
 async function signedFetch<T>(session: Pick<ApiWalletSession, "publicKey" | "privateKey" | "expiresAt">, path: string, method: string, body?: unknown, exactBody?: string): Promise<T> {
   if (session.expiresAt !== undefined && (!Number.isFinite(session.expiresAt) || Date.now() >= session.expiresAt)) {
-    throw new Error("The Strike API wallet has expired. Review its authorization before continuing.");
+    throw new Error("Your Strike connection has expired. Review it in Strike before reconnecting.");
   }
 
   const url = new URL(path, STRIKE_API_ORIGIN);
-  if (url.origin !== STRIKE_API_ORIGIN) throw new Error("Strike requests are restricted to testnet.");
+  if (url.origin !== STRIKE_API_ORIGIN) throw new Error("Strike connection is unavailable.");
   const rawBody = method.toUpperCase() === "GET" ? "" : exactBody ?? JSON.stringify(body ?? {});
   if (Date.now() - clockCheckedAt > 30_000) {
     const timeResponse = await fetch(`${STRIKE_API_ORIGIN}/v2/time`, { signal: AbortSignal.timeout(5_000) });
@@ -287,7 +287,7 @@ export async function strikeCancelOrderById<T>(orderId: string): Promise<T> {
 /** Reconcile a lost verify response with a read. Never retries verify or creates another wallet. */
 export async function reconcileBuilderAuthorization(): Promise<{ accountId: string }> {
   if (!authorizationUncertain || !pendingAuthorization) throw new Error("There is no pending authorization to check in this tab.");
-  if (!recoveryReadAllowed) throw new Error("Strike returned conflicting authorization details. Review the API wallet in Strike before continuing.");
+  if (!recoveryReadAllowed) throw new Error("Approval details do not match. Check your approval in Strike before continuing.");
   const candidate = pendingAuthorization;
   const account = await signedFetch<Record<string, unknown>>(candidate, "/v2/account", "GET");
   if (typeof account.account_id !== "string" || account.blockchain !== "ethereum"

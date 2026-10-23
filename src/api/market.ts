@@ -13,7 +13,7 @@ async function readJson<T>(url: string): Promise<T> {
     const message =
       payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
         ? payload.error
-        : "Toruni could not read Strike testnet data.";
+        : "Market data is unavailable.";
     throw new Error(message);
   }
   return payload as T;
