@@ -86,7 +86,7 @@ export async function createUserStreamLogon(
   if (!/^[0-9a-f]{64}$/i.test(publicKey) || !Number.isSafeInteger(timestamp) || timestamp <= 0) {
     throw new Error("Strike login details could not be checked.");
   }
-  const message = new TextEncoder().encode(`apiKey=${publicKey}&timestamp=${timestamp}`);
+  const message = new TextEncoder().encode(`session.logon:${timestamp}:${publicKey}`);
   const signature = new Uint8Array(await crypto.subtle.sign(
     { name: "Ed25519" } as AlgorithmIdentifier, privateKey, message,
   ));

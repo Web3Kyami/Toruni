@@ -74,6 +74,14 @@ export function connectStrikeUserStream(accountId: string, callbacks: UserStream
       for (const frame of parseUserStreamFrame(event.data)) {
         if (!frame || typeof frame !== "object") continue;
         const message = frame as Record<string, unknown>;
+        if (message.e === "error") {
+          const error = message.error && typeof message.error === "object" ? message.error as Record<string, unknown> : null;
+          authFailed = !authenticated || error?.code === 401;
+          setState("error");
+          if (!authFailed) scheduleReconnect();
+          activeSocket.close();
+          return;
+        }
         if (message.id === 1) {
           const result = message.result && typeof message.result === "object" ? message.result as Record<string, unknown> : null;
           if (message.status !== 200 || result?.authenticated !== true || result.account_id !== accountId) {
@@ -86,7 +94,8 @@ export function connectStrikeUserStream(accountId: string, callbacks: UserStream
           continue;
         }
         if (message.id === 2) {
-          if (!authenticated || message.error || (typeof message.status === "number" && message.status >= 400)) {
+          const hasResult = Object.prototype.hasOwnProperty.call(message, "result");
+          if (!authenticated || message.error || (typeof message.status === "number" && message.status >= 400) || !hasResult) {
             authFailed = true; setState("error"); activeSocket.close(); return;
           }
           subscribed = true;

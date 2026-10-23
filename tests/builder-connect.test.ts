@@ -31,6 +31,8 @@ test("signs the official userstream login payload with the in-memory Ed25519 key
   const publicBytes = Uint8Array.from(pair.publicKey.match(/.{2}/g) ?? [], hex => Number.parseInt(hex, 16));
   const publicKey = await crypto.subtle.importKey("raw", publicBytes, { name: "Ed25519" }, true, ["verify"]);
   const signatureBytes = Uint8Array.from(logon.params.signature.match(/.{2}/g) ?? [], hex => Number.parseInt(hex, 16));
-  const payload = new TextEncoder().encode(`apiKey=${pair.publicKey}&timestamp=${timestamp}`);
+  const payload = new TextEncoder().encode(`session.logon:${timestamp}:${pair.publicKey}`);
   assert.equal(await crypto.subtle.verify({ name: "Ed25519" } as AlgorithmIdentifier, publicKey, signatureBytes, payload), true);
+  const httpAuthPayload = new TextEncoder().encode(`apiKey=${pair.publicKey}&timestamp=${timestamp}`);
+  assert.equal(await crypto.subtle.verify({ name: "Ed25519" } as AlgorithmIdentifier, publicKey, signatureBytes, httpAuthPayload), false);
 });

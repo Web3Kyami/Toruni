@@ -43,7 +43,6 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
     if (!sessionHash) { sendJson(response, 401, { error: "Your Toruni session expired. Refresh the page and try again." }); return; }
     try {
       const body = await readJsonBody(request);
-      const now = Date.now();
       if (url.pathname === "/api/rounds/current/join") {
         const accountId = body && typeof body === "object" && "accountId" in body && typeof body.accountId === "string" ? body.accountId : "";
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountId)) {
@@ -56,6 +55,7 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
         const policy = readGamePolicy(snapshot.marketRules);
         if (!policy) throw new RoundGuardError("Round limits are not ready yet. You can still explore the live arena.", 423);
         const risk = await readAccountRisk(accountId);
+        const now = Date.now();
         assertFreshRisk(risk, now);
         assertWithinExposure(risk, policy.rules.maximumAccountExposure);
         const result = await transaction(client => enrollParticipant(client, sessionHash, {
@@ -84,13 +84,15 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
       }
       const policy = readGamePolicy(snapshot.marketRules);
       if (!policy) throw new RoundGuardError("Round limits are not ready yet. You can still explore the live arena.", 423);
+      const marketObservedAt = Date.now();
       const validation = validateQuoteDraft({ side, price, size }, snapshot.marketRules, snapshot.mark,
-        snapshot.depth, policy.rules.maximumQuoteNotional, now);
+        snapshot.depth, policy.rules.maximumQuoteNotional, marketObservedAt);
       if (!validation.valid || !validation.notional) {
         const error = validation.errors.price ?? validation.errors.size ?? validation.errors.general ?? "Review the quote details.";
         sendJson(response, 422, { error, errors: validation.errors }); return;
       }
       const risk = await readAccountRisk(accountId);
+      const now = Date.now();
       assertFreshRisk(risk, now);
       const notional = parseDecimal(validation.notional);
       const available = parseDecimal(risk.account.available_balance);
