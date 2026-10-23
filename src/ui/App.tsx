@@ -674,7 +674,7 @@ export function App() {
         </footer>
       </main>
 
-      <div className="mobile-order-bar">
+      <div className={`mobile-order-bar${resultsRoundId ? " mobile-order-bar--results" : ""}`}>
         <button onClick={() => setDialog("orders")}><Icon name="book" size={16} /> My orders <span>{roundData.orders.length || "—"}</span></button>
         <button onClick={openConnect}><Icon name="wallet" size={16} />{liveAccount ? "Account" : "Connect"}</button>
       </div>

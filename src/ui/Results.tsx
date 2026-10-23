@@ -2,6 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { readRoundAudit, readRoundReport, RoundNotFoundError, type AuditSample, type RoundReport } from "../api/rounds";
 import type { ObservedOrder } from "../api/useRoundData";
 
+function formatResultNumber(value: string, maximumFractionDigits: number): string {
+  const parsed = Number(value);
+  if (!value || !Number.isFinite(parsed)) return "—";
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits }).format(parsed);
+}
+
 export function Results({ roundId, onBack, onRules, myOrders = [], canCancel = false, cancelingOrderIds = new Set(), onCancel }: {
   roundId: string; onBack: () => void; onRules: () => void; myOrders?: ObservedOrder[]; canCancel?: boolean;
   cancelingOrderIds?: Set<string>; onCancel?: (clientOrderId: string) => void;
@@ -50,13 +56,22 @@ export function Results({ roundId, onBack, onRules, myOrders = [], canCancel = f
           const ownOrder = myOrders.find(item => item.client_order_id === order.client_order_id);
           const canRequestCancel = canCancel && ownOrder?.exchange_status === "open" && Boolean(ownOrder.exchange_order_id);
           const cancelRequested = cancelingOrderIds.has(order.client_order_id);
-          return <tr key={order.client_order_id}><td>{order.side === "buy" ? "Bid" : "Ask"}</td><td>{order.price}</td><td>{order.original_qty}</td><td>{order.filled_qty}</td><td>{resultOrderStatus(order.exchange_status)}</td>
-            <td>{canRequestCancel ? <button className="text-button" onClick={() => onCancel?.(order.client_order_id)} disabled={cancelRequested}>{cancelRequested ? "Checking…" : "Cancel offer"}</button> : "—"}</td></tr>;
+          return <tr key={order.client_order_id}><td><span className="mobile-cell-label" aria-hidden="true">Side</span>{order.side === "buy" ? "Bid" : "Ask"}</td>
+            <td><span className="mobile-cell-label" aria-hidden="true">Price</span>${formatResultNumber(order.price, 2)}</td>
+            <td><span className="mobile-cell-label" aria-hidden="true">Size</span>{formatResultNumber(order.original_qty, 8)} BTC</td>
+            <td><span className="mobile-cell-label" aria-hidden="true">Filled</span>{formatResultNumber(order.filled_qty, 8)} BTC</td>
+            <td><span className="mobile-cell-label" aria-hidden="true">Status</span>{resultOrderStatus(order.exchange_status)}</td>
+            <td><span className="mobile-cell-label" aria-hidden="true">Action</span>{canRequestCancel ? <button className="text-button" onClick={() => onCancel?.(order.client_order_id)} disabled={cancelRequested}>{cancelRequested ? "Checking…" : "Cancel offer"}</button> : "—"}</td></tr>;
         })}</tbody></table></div>}
       </section>
       {auditOpen && <section className="panel audit-section"><div className="panel-heading"><h2>Score history</h2><button className="text-button" onClick={() => setAuditOpen(false)}>Close</button></div>{auditLoading && <p role="status">Loading…</p>}{auditError && <p role="alert">{auditError} <button className="text-button" onClick={() => void inspectAudit()}>Try again</button></p>}{audit && <>
         <div className="audit-timeline" aria-label="Score observation timeline">{audit.length === 0 ? <p>No score history yet.</p> : audit.map(sample => <div key={`${sample.participant_id}-${sample.sampled_at}`} className={`audit-tick ${BigInt(sample.delta_scaled) > 0n ? "audit-tick--earned" : ""}`} title={`${new Date(sample.sampled_at).toLocaleTimeString()} · ${BigInt(sample.delta_scaled) > 0n ? "Points earned" : "No points earned"}`}><span className="sr-only">{sample.sampled_at}: {BigInt(sample.delta_scaled) > 0n ? "Points earned" : "No points earned"}</span></div>)}</div>
-        <p className="metric-sub">Green: points earned. Gray: no points earned.</p><div className="results-table-wrap"><table className="score-history"><thead><tr><th>Time</th><th>Buy quality</th><th>Sell quality</th><th>Points</th></tr></thead><tbody>{audit.map(sample => <tr key={`${sample.participant_id}-${sample.sampled_at}`}><td>{new Date(sample.sampled_at).toLocaleTimeString()}</td><td>{qualityPercent(sample.bid_quality_scaled)}</td><td>{qualityPercent(sample.ask_quality_scaled)}</td><td>{(Number(sample.delta_scaled) / 1e12).toFixed(3)}</td></tr>)}</tbody></table></div></>}</section>}
+        <p className="metric-sub">Green: points earned. Gray: no points earned.</p><div className="results-table-wrap"><table className="score-history"><thead><tr><th>Time</th><th>Buy quality</th><th>Sell quality</th><th>Points</th></tr></thead><tbody>{audit.map(sample => <tr key={`${sample.participant_id}-${sample.sampled_at}`}>
+          <td><span className="mobile-cell-label" aria-hidden="true">Time</span>{new Date(sample.sampled_at).toLocaleTimeString()}</td>
+          <td><span className="mobile-cell-label" aria-hidden="true">Buy quality</span>{qualityPercent(sample.bid_quality_scaled)}</td>
+          <td><span className="mobile-cell-label" aria-hidden="true">Sell quality</span>{qualityPercent(sample.ask_quality_scaled)}</td>
+          <td><span className="mobile-cell-label" aria-hidden="true">Points</span>{(Number(sample.delta_scaled) / 1e12).toFixed(3)}</td>
+        </tr>)}</tbody></table></div></>}</section>}
       <div className="results-actions"><button className="button button--primary" onClick={onBack}>Back to lobby</button><button className="button button--ghost" onClick={onRules}>Review scoring rules</button></div>
     </>}
   </section>;
