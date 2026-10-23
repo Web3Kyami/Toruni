@@ -14,6 +14,7 @@ import { connectStrikeUserStream } from "../api/userStream";
 import { formatUsd } from "./format";
 import { userFacingError } from "./errors";
 import { verifiedTerminalOrder } from "./requote";
+import { marketStatusMessage } from "./marketStatus";
 
 type Tab = "quotes" | "market" | "standings";
 type Dialog = "rules" | "how" | "connect" | "orders" | "risk" | "quote-review" | "requote" | null;
@@ -443,6 +444,7 @@ export function App() {
   };
 
   const currentMarketState = marketState === "live" && market?.mark && clock - market.mark.observedAt > 5000 ? "offline" : marketState;
+  const currentMarketMessage = marketStatusMessage(marketState, currentMarketState, marketMessage);
   const serverNow = roundData.serverTime ? roundData.serverTime + Math.max(0, clock - roundData.receivedAt) : clock;
   const round = roundData.round;
   const remaining = round ? Math.max(0, Math.ceil(((round.status === "lobby" ? round.startsAt : round.endsAt) - serverNow) / 1000)) : null;
@@ -684,7 +686,7 @@ export function App() {
 
         {currentMarketState !== "live" && currentMarketState !== "checking" && <div className={`feed-banner feed-banner--${currentMarketState}`} role="status" aria-live="polite">
           <span className="feed-banner-icon"><Icon name="alert" size={16} /></span>
-          <span>{marketMessage}</span>
+          <span>{currentMarketMessage}</span>
         </div>}
 
         <div className="mobile-score-strip"><span>{roundData.health === "unavailable" ? "Updates unavailable" : round ? round.status.replaceAll("_", " ") : "Spectating"}</span><strong>Your score {roundData.participant?.score ?? "—"}</strong></div>
@@ -781,10 +783,10 @@ export function App() {
         </footer>
       </main>
 
-      <div className="mobile-order-bar">
+      {!resultsRoundId && <div className="mobile-order-bar">
         <button onClick={() => setDialog("orders")}><Icon name="book" size={16} /> My orders <span>{roundData.orders.length || "—"}</span></button>
         <button onClick={openConnect}><Icon name="wallet" size={16} />{liveAccount ? "Account" : "Connect"}</button>
-      </div>
+      </div>}
 
       <AppDialog
         orders={roundData.orders}
