@@ -7,7 +7,7 @@ A 180-second market-making challenge on Strike Finance V2 testnet. Hold competit
 Use Node.js 22.18 or newer and npm. Wallet authorization requires an Ethereum-compatible browser wallet.
 
 ```sh
-npm ci
+npm install
 cp .env.example .env.local
 ```
 
