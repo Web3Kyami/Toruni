@@ -1,0 +1,261 @@
+import type { MarketSnapshot, StrikeDepth, StrikeDepthLevel, StrikeMark, StrikePublicAccount, VerifiedQuote } from "../shared/contracts.ts";
+
+export const STRIKE_TESTNET_ORIGIN = "https://api-v2-testnet.strikefinance.org";
+const STRIKE_PRICE_ORIGIN = `${STRIKE_TESTNET_ORIGIN}/price`;
+const MARK_FRESHNESS_LIMIT_MS = 5_000;
+
+if (new URL(STRIKE_TESTNET_ORIGIN).hostname !== "api-v2-testnet.strikefinance.org") {
+  throw new Error("The server is restricted to Strike V2 testnet.");
+}
+
+export class StrikeReadError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+    this.name = "StrikeReadError";
+  }
+}
+
+async function getJson(url: URL): Promise<unknown> {
+  const allowed = new Set([new URL(STRIKE_TESTNET_ORIGIN).origin, new URL(STRIKE_PRICE_ORIGIN).origin]);
+  if (!allowed.has(url.origin)) throw new Error("Strike read attempted outside the testnet allowlist.");
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(2_500),
+    });
+  } catch {
+    throw new StrikeReadError("Strike testnet is not reachable.", 503);
+  }
+  if (!response.ok) throw new StrikeReadError(`Strike testnet returned ${response.status}.`, response.status);
+  return response.json();
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function stringValue(record: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function field<T>(record: Record<string, unknown>, ...keys: string[]): T | null {
+  for (const key of keys) if (key in record) return record[key] as T;
+  return null;
+}
+
+export function parseMark(symbol: string, raw: unknown): StrikeMark | null {
+  const row = Array.isArray(raw) ? asRecord(raw[0]) : asRecord(raw);
+  if (!row) return null;
+  const rawMark = row.markPrice ?? row.mark_price ?? row.p;
+  const markPrice = typeof rawMark === "string" ? rawMark : null;
+  const responseSymbol = stringValue(row, "symbol", "s") ?? symbol;
+  const rawEventTime = row.E ?? row.eventTime ?? row.time;
+  const eventTime = typeof rawEventTime === "number"
+    ? rawEventTime
+    : typeof rawEventTime === "string" && /^\d+$/.test(rawEventTime)
+      ? Number(rawEventTime)
+      : Number.NaN;
+  if (!markPrice || responseSymbol !== symbol || !/^\d+(?:\.\d+)?$/.test(markPrice) || !Number.isFinite(eventTime) || eventTime <= 0) {
+    return null;
+  }
+  return { symbol, markPrice, observedAt: eventTime, source: "strike-v2-testnet" };
+}
+
+function parseDepthLevel(value: unknown): StrikeDepthLevel | null {
+  if (Array.isArray(value) && typeof value[0] === "string" && typeof value[1] === "string") {
+    return { price: value[0], size: value[1] };
+  }
+  const row = asRecord(value);
+  if (!row) return null;
+  const rawPrice = row.price ?? row.Price;
+  const rawSize = row.size ?? row.quantity ?? row.qty ?? row.Size;
+  const price = typeof rawPrice === "string" ? rawPrice : null;
+  const size = typeof rawSize === "string" ? rawSize : null;
+  return price && size ? { price, size } : null;
+}
+
+function parseDepth(raw: unknown, observedAt: number): StrikeDepth | null {
+  const row = asRecord(raw);
+  if (!row || !Array.isArray(row.bids) || !Array.isArray(row.asks)) return null;
+  return {
+    bids: row.bids.map(parseDepthLevel).filter((level): level is StrikeDepthLevel => level !== null),
+    asks: row.asks.map(parseDepthLevel).filter((level): level is StrikeDepthLevel => level !== null),
+    observedAt,
+    source: "strike-v2-testnet",
+  };
+}
+
+async function readSource(url: URL): Promise<{ data: unknown; observedAt: number } | null> {
+  try {
+    const data = await getJson(url);
+    return { data, observedAt: Date.now() };
+  } catch {
+    return null;
+  }
+}
+
+export async function readMarketSnapshot(symbol: string): Promise<MarketSnapshot> {
+  if (!/^BTC-USD$/.test(symbol)) throw new StrikeReadError("Toruni currently supports BTC-USD only.", 400);
+  const markUrl = new URL("/price/v2/markPrice", STRIKE_TESTNET_ORIGIN);
+  markUrl.searchParams.set("symbol", symbol);
+  const depthUrl = new URL("/price/v2/depth", STRIKE_TESTNET_ORIGIN);
+  depthUrl.searchParams.set("symbol", symbol);
+  depthUrl.searchParams.set("limit", "20");
+  const rulesUrl = new URL("/v2/markets", STRIKE_TESTNET_ORIGIN);
+
+  const [markRead, depthRead, rulesRead] = await Promise.all([
+    readSource(markUrl),
+    readSource(depthUrl),
+    readSource(rulesUrl),
+  ]);
+  const checkedAt = Date.now();
+  const parsedMark = markRead ? parseMark(symbol, markRead.data) : null;
+  const mark = parsedMark && checkedAt >= parsedMark.observedAt && checkedAt - parsedMark.observedAt <= MARK_FRESHNESS_LIMIT_MS
+    ? parsedMark
+    : null;
+  const depth = depthRead ? parseDepth(depthRead.data, depthRead.observedAt) : null;
+  const marketRules = rulesRead?.data ?? null;
+  const unavailableSources: MarketSnapshot["unavailableSources"] = [];
+  if (!mark) unavailableSources.push("mark");
+  if (!depth) unavailableSources.push("depth");
+  if (!marketRules) unavailableSources.push("marketRules");
+  return { symbol, checkedAt, mark, depth, marketRules, unavailableSources };
+}
+
+export async function readPublicAccount(selector: { accountId?: string; address?: string }): Promise<StrikePublicAccount> {
+  const url = new URL("/v2/account", STRIKE_TESTNET_ORIGIN);
+  if (selector.accountId) url.searchParams.set("account_id", selector.accountId);
+  else if (selector.address) {
+    url.searchParams.set("blockchain", "ethereum");
+    url.searchParams.set("blockchain_address", selector.address);
+  } else {
+    throw new StrikeReadError("A public Strike account selector is required.", 400);
+  }
+  const raw = await getJson(url);
+  const row = asRecord(raw);
+  if (!row) throw new StrikeReadError("Strike returned an invalid account record.", 502);
+  const accountId = stringValue(row, "account_id");
+  const blockchain = stringValue(row, "blockchain");
+  const address = row.blockchain_address === null ? null : stringValue(row, "blockchain_address");
+  const decimalField = (key: string): string | null => {
+    const value = row[key];
+    return typeof value === "string" && /^-?\d+(?:\.\d+)?$/.test(value) ? value : null;
+  };
+  const walletBalance = decimalField("wallet_balance");
+  const availableBalance = decimalField("available_balance");
+  const marginBalance = decimalField("margin_balance");
+  if (!accountId || !blockchain || (row.blockchain_address !== null && !address) || !walletBalance || !availableBalance || !marginBalance) {
+    throw new StrikeReadError("Strike account record is missing required identity or balance fields.", 502);
+  }
+  if (selector.address) {
+    if (blockchain !== "ethereum" || address?.toLowerCase() !== selector.address.toLowerCase()) {
+      throw new StrikeReadError("Public Strike account did not match the requested wallet.", 409);
+    }
+  }
+  return {
+    account_id: accountId,
+    blockchain,
+    blockchain_address: address,
+    wallet_balance: walletBalance,
+    available_balance: availableBalance,
+    margin_balance: marginBalance,
+  };
+}
+
+export interface RegisteredOrderIntent {
+  accountId: string;
+  clientOrderId: string;
+  symbol: string;
+  side: "buy" | "sell";
+  firstOpenObservedAt: number | null;
+}
+
+export type OrderReadResult =
+  | { kind: "not-found" }
+  | { kind: "unavailable"; status: number }
+  | { kind: "integrity-error"; reason: string }
+  | { kind: "observed"; quote: VerifiedQuote };
+
+const orderStatuses: Record<string, VerifiedQuote["status"]> = {
+  open: "open",
+  pending: "pending",
+  filled: "filled",
+  canceled: "canceled",
+  expired: "expired",
+  rejected: "rejected",
+  none: "unknown",
+  untriggered: "unknown",
+};
+
+export async function verifyPublicOrder(intent: RegisteredOrderIntent): Promise<OrderReadResult> {
+  const url = new URL("/v2/order", STRIKE_TESTNET_ORIGIN);
+  url.searchParams.set("symbol", intent.symbol);
+  url.searchParams.set("client_order_id", intent.clientOrderId);
+  url.searchParams.set("account_id", intent.accountId);
+  let raw: unknown;
+  try {
+    raw = await getJson(url);
+  } catch (error) {
+    if (error instanceof StrikeReadError && error.status === 404) return { kind: "not-found" };
+    return {
+      kind: "unavailable",
+      status: error instanceof StrikeReadError ? error.status : 503,
+    };
+  }
+
+  const row = asRecord(raw);
+  if (!row) return { kind: "integrity-error", reason: "Strike returned an invalid order record." };
+  const accountId = stringValue(row, "AccountID", "account_id");
+  const clientOrderId = stringValue(row, "ClientOrderID", "client_order_id");
+  const symbol = stringValue(row, "Symbol", "symbol");
+  if (accountId !== intent.accountId || clientOrderId !== intent.clientOrderId || symbol !== intent.symbol) {
+    return { kind: "integrity-error", reason: "Strike order identity did not match the registered intent." };
+  }
+
+  const rawSide = stringValue(row, "Side", "side")?.toLowerCase();
+  const rawStatus = stringValue(row, "Status", "status")?.toLowerCase();
+  const side = rawSide === "buy" || rawSide === "sell" ? rawSide : null;
+  const status = rawStatus ? orderStatuses[rawStatus] : undefined;
+  const type = stringValue(row, "Type", "type")?.toLowerCase();
+  const timeInForce = stringValue(row, "TimeInForce", "time_in_force")?.toUpperCase();
+  const postOnly = field<boolean>(row, "PostOnly", "post_only");
+  const size = stringValue(row, "Size", "size");
+  const filled = stringValue(row, "Filled", "filled") ?? "0";
+  const price = stringValue(row, "Price", "price");
+  if (!side || !status || !type || !timeInForce || typeof postOnly !== "boolean" || !size || !price) {
+    return { kind: "integrity-error", reason: "Strike order record is missing required verification fields." };
+  }
+  if (side !== intent.side) return { kind: "integrity-error", reason: "Strike order side did not match the registered intent." };
+
+  const verifiedAt = Date.now();
+  return {
+    kind: "observed",
+    quote: {
+      accountId,
+      clientOrderId,
+      symbol,
+      side,
+      status,
+      type,
+      timeInForce,
+      postOnly,
+      size,
+      filled,
+      price,
+      firstOpenObservedAt: intent.firstOpenObservedAt ?? (status === "open" ? verifiedAt : 0),
+      lastVerifiedAt: verifiedAt,
+      provenance: "strike-public-order-read",
+    },
+  };
+}
