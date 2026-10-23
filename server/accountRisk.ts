@@ -1,6 +1,6 @@
 import { alignDecimals, compareDecimals, formatDecimal, parseDecimal } from "../shared/decimal.ts";
 import type { StrikePublicAccount, StrikePosition, StrikeMark } from "../shared/contracts.ts";
-import { readFreshMark, readPublicAccount, readPublicPositions } from "./strike.ts";
+import { MARK_FRESHNESS_LIMIT_MS, readFreshMark, readPublicAccount, readPublicPositions } from "./strike.ts";
 import { RoundGuardError } from "./roundService.ts";
 
 export interface AccountRiskEvidence {
@@ -45,14 +45,18 @@ export async function readAccountRisk(accountId: string): Promise<AccountRiskEvi
   }
   return {
     account, positions: positionRead.positions, mark,
-    observedAt: Math.min(account.observedAt, positionRead.observedAt, mark.observedAt),
+    // Account and position reads have a 3-second admission window. The exchange
+    // mark has its own 5-second event-time window and must not shorten that one.
+    observedAt: Math.min(account.observedAt, positionRead.observedAt),
     absoluteExposure: formatDecimal(exposure),
   };
 }
 
 export function assertFreshRisk(evidence: AccountRiskEvidence, now: number): void {
   const available = parseDecimal(evidence.account.available_balance);
-  if (!available || available.coefficient < 0n || now < evidence.observedAt || now - evidence.observedAt > 3_000) {
+  const riskIsFresh = now >= evidence.observedAt && now - evidence.observedAt <= 3_000;
+  const markIsFresh = now >= evidence.mark.observedAt && now - evidence.mark.observedAt <= MARK_FRESHNESS_LIMIT_MS;
+  if (!available || available.coefficient < 0n || !riskIsFresh || !markIsFresh) {
     throw new RoundGuardError("Strike balance and position data must be current before continuing.", 423);
   }
 }

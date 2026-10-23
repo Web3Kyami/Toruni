@@ -20,14 +20,14 @@ export function Results({ roundId, onBack, onRules, myOrders = [], canCancel = f
     catch (failure) {
       setReport(null);
       setMissing(failure instanceof RoundNotFoundError);
-      setError(failure instanceof Error ? failure.message : "The report is unavailable.");
+      setError("Could not load these results. Check your connection and try again.");
     } finally { setLoading(false); }
   }, [roundId]);
   useEffect(() => { void refresh(); }, [refresh]);
   const inspectAudit = async () => {
     setAuditOpen(true); setAuditLoading(true); setAuditError("");
     try { setAudit(await readRoundAudit(roundId)); }
-    catch (failure) { setAuditError(failure instanceof Error ? failure.message : "Scoring evidence is unavailable."); }
+    catch { setAuditError("Score history is unavailable. Try again shortly."); }
     finally { setAuditLoading(false); }
   };
   const unresolved = report?.participants.some(row => row.cleanupState !== "verified");

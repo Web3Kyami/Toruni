@@ -344,7 +344,7 @@ h1 em { font-style: normal; color: var(--lime); }
   .results-actions { flex-direction:column; }
 }
 
-.network-badge { display:none; }
+.network-badge { display:inline-flex; align-items:center; font:700 14px var(--mono); letter-spacing:.04em; color:var(--lime); }
 .arena-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:4px 0 28px; }
 .arena-heading h1 { font-size: 32px; margin:10px 0 0; }
 .modal--wallet { position:fixed; inset:0 0 0 auto; margin:0; width:min(460px,100vw); height:100dvh; max-height:100dvh; border-radius:12px 0 0 12px; padding:26px; }

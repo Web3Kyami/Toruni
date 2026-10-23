@@ -59,7 +59,7 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
         assertFreshRisk(risk, now);
         assertWithinExposure(risk, policy.rules.maximumAccountExposure);
         const result = await transaction(client => enrollParticipant(client, sessionHash, {
-          accountId, observedAt: Math.min(snapshot.checkedAt, snapshot.mark!.observedAt, snapshot.marketRules!.observedAt, risk.observedAt),
+          accountId, observedAt: Math.min(snapshot.checkedAt, snapshot.marketRules!.observedAt, risk.observedAt),
           availableCollateral: risk.account.available_balance, requiredCollateral: policy.requiredCollateral,
           absoluteExposure: risk.absoluteExposure,
           effectiveLeverage: risk.account.symbolSettings?.["BTC-USD"]?.leverage ?? 0,

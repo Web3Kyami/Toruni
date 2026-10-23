@@ -2,7 +2,7 @@ import type { MarketSnapshot, StrikeDepth, StrikeDepthLevel, StrikeMark, StrikeP
 
 export const STRIKE_TESTNET_ORIGIN = "https://api-v2-testnet.strikefinance.org";
 const STRIKE_PRICE_ORIGIN = `${STRIKE_TESTNET_ORIGIN}/price`;
-const MARK_FRESHNESS_LIMIT_MS = 5_000;
+export const MARK_FRESHNESS_LIMIT_MS = 5_000;
 
 if (new URL(STRIKE_TESTNET_ORIGIN).hostname !== "api-v2-testnet.strikefinance.org") {
   throw new Error("The server is restricted to Strike V2 testnet.");

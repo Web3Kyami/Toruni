@@ -56,7 +56,7 @@ Only `api-v2-testnet.strikefinance.org` accepts authenticated requests. There is
 
 ## Verified testnet status
 
-A genuine app-driven 180-second round submitted a post-only GTC BTC-USD bid, independently verified it as open, and later observed it filled. Toruni stored 118 audit observations and replayed a score of 5.512825485670, displayed as 5.51. The round recorded 16 eligible bid seconds and no ask seconds, so a complete two-sided round through the app has not yet been verified. A fill can leave a position open; Toruni never closes positions automatically.
+A genuine app-driven 180-second round submitted a post-only GTC BTC-USD bid and ask. Strike independently verified both as open; the server stored 165 score observations whose exact deltas replay to 29.458152707184, displayed as 29.46, including 18 two-sided seconds. The bid filled 0.00124 BTC and the ask was canceled with no fill. The round reached `completed`; a separate guarded reduce-only testnet order closed the resulting position, and a fresh Strike read verified the account was flat. Toruni never closes positions automatically.
 
 Round entry stays closed until both risk limits are set. At 1x, the app uses twice the per-quote cap as a baseline reserve estimate for both offers. Strike fees and positions created by fills may require more; the actual available balance and risk are rechecked before each order. These limits have no default because the blueprint does not approve numeric values. A successful create response is not proof that an order is open. Canceling an order does not close any position created by a fill.
 

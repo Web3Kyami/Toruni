@@ -11,6 +11,8 @@ import { cancelToruniOrder, placePostOnlyLimitOrder } from "../api/orders";
 import { ensureToruniSession, joinCurrentRound, readGamePolicy, requestQuoteIntent, type GamePolicy } from "../api/game";
 import { validateQuoteDraft } from "../../shared/quoteValidation";
 import { connectStrikeUserStream } from "../api/userStream";
+import { formatUsd } from "./format";
+import { userFacingError } from "./errors";
 
 type Tab = "quotes" | "market" | "standings";
 type Dialog = "rules" | "how" | "connect" | "orders" | "risk" | "quote-review" | null;
@@ -136,7 +138,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
         <div className="balance-row"><span>Side</span><strong>{quoteReview.side === "buy" ? "Buy · bid" : "Sell · ask"}</strong></div>
         <div className="balance-row"><span>Price</span><strong>${formatPrice(quoteReview.price)}</strong></div>
         <div className="balance-row"><span>Size</span><strong>{quoteReview.size} BTC</strong></div>
-        <div className="balance-row"><span>Order value</span><strong>${quoteReview.notional}</strong></div>
+        <div className="balance-row"><span>Order value</span><strong>{formatUsd(quoteReview.notional)}</strong></div>
         <p className="risk-warning">This offer rests on the market. If filled, it opens a position. Canceling it does not close that position.</p>
         <button className="button button--primary button--wide" onClick={onSubmitQuote} disabled={!canWriteOrders || quoteSubmitting}>
           {quoteSubmitting ? "Sending to Strike…" : "Place offer"}<Icon name="arrow" />
@@ -146,7 +148,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
         {riskLoading && <p role="status">Checking Strike account data…</p>}
         {riskError && <p className="inline-error" role="alert">{riskError}</p>}
         {!account && <p>Connect to view your balance and positions.</p>}
-        {risk && <><div className="balance-row"><span>Available balance</span><strong>{risk.account.available_balance}</strong></div>
+        {risk && <><div className="balance-row"><span>Available balance</span><strong>{formatUsd(risk.account.available_balance)}</strong></div>
           <h3>Open positions</h3>{risk.positions.length === 0 ? <p>No open positions.</p> : <ul className="position-list">{risk.positions.map((position, index) => <li key={`${position.symbol}-${index}`}><strong>{position.symbol}</strong><span>Size {position.size}</span><span>{position.leverage}x · {position.marginMode}</span></li>)}</ul>}
           <p className="modal-note">Leverage: {risk.account.symbolSettings?.["BTC-USD"]?.leverage !== undefined ? `${risk.account.symbolSettings["BTC-USD"].leverage}x` : "Unavailable"}. Toruni requires 1x to play.</p></>}
         {account && <button className="button button--ghost button--wide" onClick={onRiskRefresh} disabled={riskLoading}>Refresh account and positions</button>}
@@ -156,8 +158,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
         {stage === "connected" && address && <div className="connected-summary">
           <StatusPill state="live">CONNECTED</StatusPill>
           <p className="wallet-address"><Icon name="wallet" size={17} />{shortAddress(address)}</p>
-          {account ? <div className="balance-row"><span>Available balance</span><strong>{account.available_balance}</strong></div> : <p className="inline-error" role="status"><Icon name="alert" size={17} />Your wallet is authorized, but the balance is unavailable. Check again shortly.</p>}
-          <p className="modal-note">Keep this tab open. Your balance must be confirmed before you can join.</p>
+          {account ? <div className="balance-row"><span>Available balance</span><strong>{formatUsd(account.available_balance)}</strong></div> : <p className="inline-error" role="status"><Icon name="alert" size={17} />Your wallet is authorized, but the balance is unavailable. Check again shortly.</p>}
           {error && <p className="inline-error" role="status">{error}</p>}
           {stage === "connected" && account && <button className="button button--ghost button--wide" onClick={onRiskRefresh} disabled={riskLoading}>
             {riskLoading ? "Refreshing account…" : "Refresh balance and positions"}
@@ -261,7 +262,7 @@ export function App() {
   };
   useEffect(() => {
     void ensureToruniSession().then(() => { setSessionReady(true); setSessionError(""); })
-      .catch(error => setSessionError(error instanceof Error ? error.message : "Toruni session is unavailable."));
+      .catch(error => setSessionError(userFacingError(error, "Toruni could not prepare your connection. Refresh and try again.")));
   }, []);
   useEffect(() => {
     let cancelled = false;
@@ -359,7 +360,7 @@ export function App() {
       }
     } catch (error) {
       setConnectStage("idle");
-      setConnectError(error instanceof Error ? error.message : "Could not read Strike account status.");
+      setConnectError(userFacingError(error, "Could not check your Strike account. Check your connection and try again."));
     }
   };
 
@@ -383,7 +384,7 @@ export function App() {
       }
     } catch (error) {
       setConnectStage(isBuilderAuthorizationUncertain() ? "unknown" : account ? "account-found" : "new-account");
-      setConnectError(error instanceof Error ? error.message : "Strike authorization could not be completed.");
+      setConnectError(userFacingError(error, "Strike authorization could not be completed. Check your wallet and try again."));
     }
   };
 
@@ -398,7 +399,7 @@ export function App() {
         setAccount(verified);
         void refreshRisk(verified.account_id);
       } catch { setAccount(null); setConnectError("Authorization is active, but the account balance is unavailable. Do not authorize again."); }
-    } catch (failure) { setConnectError(failure instanceof Error ? failure.message : "Authorization could not be checked."); }
+    } catch (failure) { setConnectError(userFacingError(failure, "Authorization could not be checked. Try again shortly.")); }
     finally { setRecovering(false); }
   };
   const explore = () => {
@@ -488,7 +489,7 @@ export function App() {
       const joined = await joinCurrentRound(apiSession.accountId);
       setDialog(null); navigate("/arena"); setTab("quotes");
       setNotice(`You joined the challenge. It begins in ${Math.max(0, Math.ceil((joined.startsAt - Date.now()) / 1000))} seconds.`);
-    } catch (error) { setJoinError(error instanceof Error ? error.message : "Toruni could not join this challenge."); }
+    } catch (error) { setJoinError(userFacingError(error, "Toruni could not join this challenge. Check your connection and try again.")); }
     finally { setJoining(false); }
   };
 
@@ -525,7 +526,7 @@ export function App() {
       setDialog(null); setQuoteReview(null);
       setNotice(intentIssued
         ? "Strike may have received this order. Toruni is checking its status. Do not submit it again yet."
-        : error instanceof Error ? error.message : "Quote could not be reviewed. Refresh before trying again.");
+        : userFacingError(error, "Quote could not be reviewed. Refresh before trying again."));
     } finally { setQuoteSubmitting(false); }
   };
 
