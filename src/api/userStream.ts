@@ -30,6 +30,11 @@ if (new URL(socketUrl).origin !== "wss://api-v2-testnet.strikefinance.org") {
 const AUTH_CLOSE_CODES = new Set([1008, 4001, 4003, 4401, 4403]);
 const MAX_RECONNECTS = 10;
 const RECONNECT_DELAY_MS = 5_000;
+const WEBSOCKET_CLOSED = 3;
+
+export function shouldReconnectWhenVisible(visibility: DocumentVisibilityState, socketReadyState: number | null): boolean {
+  return visibility === "visible" && (socketReadyState === null || socketReadyState === WEBSOCKET_CLOSED);
+}
 
 export function connectStrikeUserStream(accountId: string, callbacks: UserStreamCallbacks): () => void {
   let stopped = false;
@@ -119,7 +124,7 @@ export function connectStrikeUserStream(accountId: string, callbacks: UserStream
   };
 
   const onVisibility = () => {
-    if (document.visibilityState === "visible" && socket?.readyState !== WebSocket.OPEN && !authFailed) {
+    if (shouldReconnectWhenVisible(document.visibilityState, socket?.readyState ?? null) && !authFailed) {
       if (retryTimer) window.clearTimeout(retryTimer);
       retryTimer = 0;
       scheduleReconnect(true);
