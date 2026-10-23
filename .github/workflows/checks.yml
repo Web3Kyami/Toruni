@@ -18,7 +18,13 @@ jobs:
           node-version: "22.18"
           cache: npm
 
-      - name: Install dependencies
+      - name: Refresh platform dependency metadata
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Check the committed lockfile
+        run: git diff -- package-lock.json
+
+      - name: Verify a clean install
         run: npm ci
 
       - name: Run tests
