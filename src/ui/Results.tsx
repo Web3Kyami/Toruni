@@ -8,6 +8,12 @@ function formatResultNumber(value: string, maximumFractionDigits: number): strin
   return new Intl.NumberFormat("en-US", { maximumFractionDigits }).format(parsed);
 }
 
+function requestErrorMessage(failure: unknown, item: string): string {
+  if (failure instanceof TypeError) return `We couldn't load ${item}. Check your connection and try again.`;
+  if (failure instanceof Error) return failure.message;
+  return `We couldn't load ${item}. Try again.`;
+}
+
 export function Results({ roundId, onBack, onRules, myOrders = [], canCancel = false, cancelingOrderIds = new Set(), onCancel }: {
   roundId: string; onBack: () => void; onRules: () => void; myOrders?: ObservedOrder[]; canCancel?: boolean;
   cancelingOrderIds?: Set<string>; onCancel?: (clientOrderId: string) => void;
@@ -26,14 +32,14 @@ export function Results({ roundId, onBack, onRules, myOrders = [], canCancel = f
     catch (failure) {
       setReport(null);
       setMissing(failure instanceof RoundNotFoundError);
-      setError(failure instanceof Error ? failure.message : "The report is unavailable.");
+      setError(requestErrorMessage(failure, "the results"));
     } finally { setLoading(false); }
   }, [roundId]);
   useEffect(() => { void refresh(); }, [refresh]);
   const inspectAudit = async () => {
     setAuditOpen(true); setAuditLoading(true); setAuditError("");
     try { setAudit(await readRoundAudit(roundId)); }
-    catch (failure) { setAuditError(failure instanceof Error ? failure.message : "Scoring evidence is unavailable."); }
+    catch (failure) { setAuditError(requestErrorMessage(failure, "score history")); }
     finally { setAuditLoading(false); }
   };
   const unresolved = report?.participants.some(row => row.cleanupState !== "verified");
