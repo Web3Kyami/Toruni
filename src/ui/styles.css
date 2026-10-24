@@ -1,4 +1,6 @@
 @font-face { font-family: "Plus Jakarta Sans"; src: url("../assets/plus-jakarta-sans.woff2") format("woff2"); font-style: normal; font-weight: 200 800; font-display: swap; }
+[data-rk], [data-rk] * { font-family: "Plus Jakarta Sans", system-ui, sans-serif !important; }
+[data-rk] button:focus-visible { outline: 2px solid #b5ef55; outline-offset: 3px; }
 :root {
   color-scheme: dark;
   font-family: "Plus Jakarta Sans", system-ui, sans-serif;
@@ -459,6 +461,41 @@ h1 em { font-style: normal; color: var(--lime); }
 }
 .score-history { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
 .score-history th, .score-history td { padding: 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+
+@media (max-width: 600px) {
+  [data-rk] [role="document"] > div {
+    width: 100vw !important;
+    min-width: 0 !important;
+    height: fit-content !important;
+    min-height: 0 !important;
+    max-height: calc(100dvh - 24px) !important;
+    flex: 0 0 auto !important;
+  }
+  [data-rk] [role="document"] > div > div {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    min-width: 0 !important;
+    height: fit-content !important;
+    min-height: 0 !important;
+    max-height: calc(100dvh - 24px) !important;
+    flex: 0 0 auto !important;
+  }
+  [data-rk] [role="document"] > div > div > div,
+  [data-rk] [role="document"] > div > div > div > div {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: fit-content !important;
+    min-height: 0 !important;
+    max-height: calc(100dvh - 24px) !important;
+    flex: 0 0 auto !important;
+  }
+  [data-rk] [role="document"] > div > div > div > div {
+    flex-direction: column !important;
+  }
+  [data-rk] [role="document"] > div > div > div > div > div:nth-child(2) {
+    display: none !important;
+  }
+}
 
 
 /* Visible text floor and touch targets */

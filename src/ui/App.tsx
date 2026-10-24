@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import type { MarketSnapshot } from "../../shared/contracts";
 import { authorizeBuilderConnect, clearApiSession, getBuilderCode, getCurrentApiSession, isBuilderAuthorizationUncertain, reconcileBuilderAuthorization } from "../api/builderConnect";
 import { readMarketSnapshot, readPublicStrikeAccount, readRiskSnapshot, type RiskSnapshot, type PublicStrikeAccount } from "../api/market";
-import { getEthereumProvider, requestWalletAddress, type EthereumProvider } from "../api/walletProvider";
+import type { EthereumProvider } from "../api/walletProvider";
 import { cancelToruniOrder, placePostOnlyLimitOrder } from "../api/orders";
 import { ensureToruniSession, joinCurrentRound, readGamePolicy, requestQuoteIntent, type GamePolicy } from "../api/game";
 import { validateQuoteDraft } from "../../shared/quoteValidation";
@@ -15,6 +15,8 @@ import { formatUsd } from "./format";
 import { userFacingError } from "./errors";
 import { verifiedTerminalOrder } from "./requote";
 import { marketStatusMessage } from "./marketStatus";
+import { readConnectedWalletAddress } from "../api/walletProvider";
+import { useWalletConnection, type WalletConnectorBridge } from "../wallet/WalletConnectionProvider";
 
 type Tab = "quotes" | "market" | "standings";
 type Dialog = "rules" | "how" | "connect" | "orders" | "risk" | "quote-review" | "requote" | null;
@@ -72,7 +74,7 @@ function StatusPill({ state, children }: { state: "live" | "waiting" | "paused";
   return <span className={`status-pill status-pill--${state}`}><span className="status-dot" />{children}</span>;
 }
 
-function AppDialog({ kind, onClose, address, account, stage, error, onLookup, onAuthorize, onReconcile, recovering, risk, riskLoading, riskError, onRiskRefresh, orders, ordersCurrent, canJoinRound, joinBlockReason, joining, joinError, onJoin, quoteReview, quoteSubmitting, canWriteOrders, canCancelOrders, onSubmitQuote, onCancelOrder, cancelingOrderIds, requoteOrder, requoteStage, requoteError, onConfirmRequote, onCheckRequote, onOpenRisk }: {
+function AppDialog({ kind, onClose, address, account, stage, error, onChooseWallet, onAuthorize, onReconcile, recovering, risk, riskLoading, riskError, onRiskRefresh, orders, ordersCurrent, canJoinRound, joinBlockReason, joining, joinError, onJoin, quoteReview, quoteSubmitting, canWriteOrders, canCancelOrders, onSubmitQuote, onCancelOrder, cancelingOrderIds, requoteOrder, requoteStage, requoteError, onConfirmRequote, onCheckRequote, onOpenRisk }: {
   orders: ObservedOrder[];
   ordersCurrent: boolean;
   canJoinRound: boolean;
@@ -99,7 +101,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
   account: PublicStrikeAccount | null;
   stage: ConnectStage;
   error: string;
-  onLookup: () => void;
+  onChooseWallet: () => void;
   onAuthorize: () => void;
   onReconcile: () => void;
   recovering: boolean;
@@ -129,7 +131,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
   }, [kind]);
 
   const isConnect = kind === "connect";
-  const title = kind === "rules" ? "How scoring works" : kind === "how" ? "Make both sides count" : kind === "risk" ? "Margin and positions" : kind === "orders" ? "Your offers" : kind === "quote-review" ? `Review ${quoteReview?.side === "buy" ? "bid" : "ask"}` : kind === "requote" ? `Requote ${requoteOrder?.side === "buy" ? "bid" : "ask"}` : "Connect wallet";
+  const title = kind === "rules" ? "How scoring works" : kind === "how" ? "Make both sides count" : kind === "risk" ? "Margin and positions" : kind === "orders" ? "Your offers" : kind === "quote-review" ? `Review ${quoteReview?.side === "buy" ? "bid" : "ask"}` : kind === "requote" ? `Requote ${requoteOrder?.side === "buy" ? "bid" : "ask"}` : stage === "checking-account" ? "Checking account" : stage === "account-found" || stage === "new-account" ? "Authorize Toruni" : stage === "connected" ? "Your Strike account" : stage === "unknown" ? "Check approval" : "Connect wallet";
   if (!kind) return null;
   return createPortal(
     <div className={`dialog-overlay ${isConnect || kind === "risk" ? "dialog-overlay--side" : ""}`} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
@@ -213,6 +215,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
           </button>}
           {stage === "connected" && !canJoinRound && <p className="modal-note">{joinBlockReason}</p>}
           {joinError && <p className="inline-error" role="alert">{joinError}</p>}
+          {getBuilderCode() && <button className="button button--ghost button--wide" onClick={onChooseWallet}>Change wallet</button>}
         </div>}
         {stage === "unknown" && <div className="unknown-auth">
           <StatusPill state="paused">APPROVAL UNCLEAR</StatusPill>
@@ -222,14 +225,10 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
           {error && <p className="inline-error" role="alert">{error}</p>}
         </div>}
         {stage !== "connected" && stage !== "unknown" && <>
-          <p>Connect your wallet to view your balance. This will not place an offer or move funds.</p>
           {stage === "account-found" && <div className="account-found"><StatusPill state="live">ACCOUNT FOUND</StatusPill><span>{address ? shortAddress(address) : ""}</span></div>}
           {stage === "new-account" && <div className="account-found account-found--new"><StatusPill state="waiting">NO ACCOUNT FOUND</StatusPill><span>Strike may create one after you approve its message.</span></div>}
           {address && <p className="wallet-address"><Icon name="wallet" size={17} />{shortAddress(address)}</p>}
           {error && <p className="inline-error" role="alert"><Icon name="alert" size={17} />{error}</p>}
-          {stage === "idle" && <button className="button button--primary button--wide" onClick={onLookup} disabled={!getBuilderCode()}>
-            <Icon name="wallet" />{getBuilderCode() ? "Connect wallet" : "Wallet unavailable"}<Icon name="arrow" />
-          </button>}
           {stage === "account-found" && <>
             <div className="authorization-notice"><Icon name="shield" size={18} /><span>Toruni adds no fee. Strike’s trading fees may apply. This replaces any prior Toruni approval. Approval does not place an offer or deposit funds.</span></div>
             <button className="button button--primary button--wide" onClick={onAuthorize}>
@@ -244,6 +243,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
           </>}
           {stage === "checking-account" && <div className="progress-line"><span className="spinner" />Checking account…</div>}
           {stage === "authorizing" && <div className="progress-line"><span className="spinner" />Waiting for wallet approval…</div>}
+          {getBuilderCode() && stage !== "checking-account" && stage !== "authorizing" && <button className="button button--ghost button--wide" onClick={onChooseWallet}>Choose another wallet</button>}
           {!getBuilderCode() && <p className="modal-note">Wallet connection is unavailable. You can still explore the arena.</p>}
         </>}
         <button className="button button--ghost button--wide spectator-return" onClick={onClose}>Return as spectator</button>
@@ -253,6 +253,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onLookup, on
 }
 
 export function App() {
+  const { address: selectedAddress, connector: selectedConnector, connected: walletConnected, connectModalOpen, pickerLoading, openWalletPicker, disconnectWallet } = useWalletConnection();
   const [pathname, setPathname] = useState(window.location.pathname);
   const navigate = useCallback((path: string) => {
     window.history.pushState(null, "", path);
@@ -288,6 +289,10 @@ export function App() {
   const [account, setAccount] = useState<PublicStrikeAccount | null>(null);
   const [connectError, setConnectError] = useState("");
   const [provider, setProvider] = useState<EthereumProvider | null>(null);
+  const pendingWalletConnect = useRef(false);
+  const walletPickerWasOpen = useRef(false);
+  const walletAttempt = useRef(0);
+  const observedWalletAddress = useRef<string | null>(null);
   const [notice, setNotice] = useState("");
   const [recovering, setRecovering] = useState(false);
   const [risk, setRisk] = useState<RiskSnapshot | null>(null);
@@ -333,20 +338,6 @@ export function App() {
     void poll();
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, []);
-  useEffect(() => {
-    if (!provider?.on || !walletAddress) return;
-    const changed = (accounts: unknown) => {
-      const selected = Array.isArray(accounts) && typeof accounts[0] === "string" ? accounts[0] : "";
-      if (selected.toLowerCase() !== walletAddress.toLowerCase()) {
-        clearApiSession(); setAccount(null); setRisk(null); setWalletAddress("");
-        setConnectStage(isBuilderAuthorizationUncertain() ? "unknown" : "idle");
-        setConnectError("Wallet selection changed. Check the selected account before continuing.");
-      }
-    };
-    provider.on("accountsChanged", changed);
-    return () => provider.removeListener?.("accountsChanged", changed);
-  }, [provider, walletAddress]);
-
   const refreshMarket = useCallback(async () => {
     try {
       const snapshot = await readMarketSnapshot("BTC-USD");
@@ -389,37 +380,118 @@ export function App() {
     }
   }, []);
 
-  const openConnect = () => {
-    if (isBuilderAuthorizationUncertain()) setConnectStage("unknown");
-    else if (getCurrentApiSession()) setConnectStage("connected");
-    else if (connectStage !== "checking-account" && connectStage !== "authorizing") setConnectStage("idle");
-    setDialog("connect");
-  };
-
-  const lookupAccount = async () => {
+  const lookupSelectedWallet = useCallback(async (address: string, selectedConnector: WalletConnectorBridge) => {
+    const attempt = ++walletAttempt.current;
     setConnectError("");
     setConnectStage("checking-account");
+    setDialog("connect");
     try {
-      const nextProvider = getEthereumProvider();
-      const address = await requestWalletAddress(nextProvider);
+      const nextProvider = await selectedConnector.getProvider() as EthereumProvider;
+      const verifiedAddress = await readConnectedWalletAddress(nextProvider, address);
+      if (attempt !== walletAttempt.current) return;
       setProvider(nextProvider);
-      setWalletAddress(address);
+      setWalletAddress(verifiedAddress);
+
+      const session = getCurrentApiSession();
+      const alreadyAuthorized = session?.address.toLowerCase() === verifiedAddress.toLowerCase();
       try {
-        const result = await readPublicStrikeAccount(address);
+        const result = await readPublicStrikeAccount(verifiedAddress);
+        if (attempt !== walletAttempt.current) return;
         setAccount(result);
-        setConnectStage("account-found");
+        setConnectStage(alreadyAuthorized ? "connected" : "account-found");
       } catch (error) {
+        if (attempt !== walletAttempt.current) return;
         if (error instanceof Error && error.message.toLowerCase().includes("not found")) {
           setAccount(null);
-          setConnectStage("new-account");
+          setConnectStage(alreadyAuthorized ? "connected" : "new-account");
           return;
         }
         throw error;
       }
     } catch (error) {
+      if (attempt !== walletAttempt.current) return;
       setConnectStage("idle");
-      setConnectError(userFacingError(error, "Could not check your Strike account. Check your connection and try again."));
+      setConnectError(userFacingError(error, "Could not check your Strike account. Check your wallet and try again."));
     }
+  }, []);
+
+  const chooseAnotherWallet = useCallback(async () => {
+    if (!getBuilderCode() || isBuilderAuthorizationUncertain()) return;
+    pendingWalletConnect.current = true;
+    walletAttempt.current++;
+    setConnectError("");
+    setDialog(null);
+    try {
+      if (walletConnected) await disconnectWallet();
+      openWalletPicker();
+    } catch (error) {
+      pendingWalletConnect.current = false;
+      setConnectStage("idle");
+      setConnectError(userFacingError(error, "The wallet could not be changed. Try disconnecting it in your wallet and reconnect."));
+      setDialog("connect");
+    }
+  }, [disconnectWallet, openWalletPicker, walletConnected]);
+
+  useEffect(() => {
+    if (connectModalOpen) walletPickerWasOpen.current = true;
+    if (!connectModalOpen && !walletConnected && walletPickerWasOpen.current) {
+      pendingWalletConnect.current = false;
+      walletPickerWasOpen.current = false;
+    }
+  }, [connectModalOpen, walletConnected]);
+
+  useEffect(() => {
+    const nextAddress = walletConnected && selectedAddress ? selectedAddress : null;
+    const previousAddress = observedWalletAddress.current;
+    if (previousAddress && previousAddress.toLowerCase() !== nextAddress?.toLowerCase()) {
+      walletAttempt.current++;
+      const uncertain = isBuilderAuthorizationUncertain();
+      if (!uncertain) {
+        clearApiSession();
+        setAccount(null);
+        setRisk(null);
+        setWalletAddress("");
+        setProvider(null);
+        setConnectStage("idle");
+        setDialog(null);
+      } else {
+        setConnectStage("unknown");
+        setDialog("connect");
+      }
+      setConnectError("Wallet selection changed. Check the selected account before continuing.");
+    }
+    observedWalletAddress.current = nextAddress;
+    if (!pendingWalletConnect.current || !nextAddress || !selectedConnector) return;
+    pendingWalletConnect.current = false;
+    walletPickerWasOpen.current = false;
+    void lookupSelectedWallet(nextAddress, selectedConnector);
+  }, [walletConnected, selectedAddress, selectedConnector, lookupSelectedWallet]);
+
+  const openConnect = () => {
+    if (isBuilderAuthorizationUncertain()) {
+      setConnectStage("unknown");
+      setDialog("connect");
+      return;
+    }
+    if (walletConnected && selectedAddress && selectedConnector) {
+      setDialog("connect");
+      const session = getCurrentApiSession();
+      if (session?.address.toLowerCase() === selectedAddress.toLowerCase() && account) {
+        setConnectStage("connected");
+      } else {
+        void lookupSelectedWallet(selectedAddress, selectedConnector);
+      }
+      return;
+    }
+    if (!getBuilderCode()) {
+      setConnectStage("idle");
+      setConnectError("Wallet connection is unavailable right now.");
+      setDialog("connect");
+      return;
+    }
+    pendingWalletConnect.current = true;
+    setConnectError("");
+    openWalletPicker();
   };
 
   const authorize = async () => {
@@ -480,7 +552,8 @@ export function App() {
   const bid = market?.depth?.bids[0];
   const ask = market?.depth?.asks[0];
   const apiSession = getCurrentApiSession();
-  const liveAccount = connectStage === "connected" && account !== null && apiSession?.accountId === account.account_id;
+  const liveAccount = walletConnected && selectedAddress?.toLowerCase() === walletAddress.toLowerCase()
+    && connectStage === "connected" && account !== null && apiSession?.accountId === account.account_id;
   const userStreamAccountId = apiSession?.accountId;
   useEffect(() => {
     if (!liveAccount || !userStreamAccountId) return;
@@ -690,10 +763,10 @@ export function App() {
         <StatusPill state={currentMarketState === "live" ? "live" : currentMarketState === "checking" ? "waiting" : "paused"}>
           {currentMarketState === "live" ? "LIVE DATA" : currentMarketState === "checking" ? "CONNECTING" : "PAUSED"}
         </StatusPill>
-        <button className="button button--connect" onClick={openConnect} aria-label={liveAccount ? `Connected wallet ${shortAddress(walletAddress)}` : "Connect wallet"}>
+        <button className="button button--connect" onClick={openConnect} disabled={pickerLoading} aria-label={pickerLoading ? "Opening wallet options" : liveAccount ? `Connected wallet ${shortAddress(walletAddress)}` : "Connect wallet"}>
           <Icon name="wallet" size={17} />
-          <span className="connect-label-full">{liveAccount ? shortAddress(walletAddress) : "Connect wallet"}</span>
-          <span className="connect-label-short" aria-hidden="true">{liveAccount ? shortAddress(walletAddress) : "Connect"}</span>
+          <span className="connect-label-full">{pickerLoading ? "Opening wallets…" : liveAccount ? shortAddress(walletAddress) : "Connect wallet"}</span>
+          <span className="connect-label-short" aria-hidden="true">{pickerLoading ? "Opening…" : liveAccount ? shortAddress(walletAddress) : "Connect"}</span>
         </button>
       </header>
 
@@ -817,7 +890,7 @@ export function App() {
 
       {!resultsRoundId && <div className="mobile-order-bar">
         <button onClick={() => setDialog("orders")}><Icon name="book" size={16} /> My orders <span>{roundData.orders.length || "—"}</span></button>
-        <button onClick={openConnect}><Icon name="wallet" size={16} />{liveAccount ? "Account" : "Connect"}</button>
+        <button onClick={openConnect} disabled={pickerLoading}><Icon name="wallet" size={16} />{pickerLoading ? "Opening…" : liveAccount ? "Account" : "Connect"}</button>
       </div>}
 
       <AppDialog
@@ -847,7 +920,7 @@ export function App() {
         account={account}
         stage={connectStage}
         error={connectError}
-        onLookup={() => void lookupAccount()}
+        onChooseWallet={() => void chooseAnotherWallet()}
         onAuthorize={() => void authorize()}
         onReconcile={() => void reconcile()}
         recovering={recovering}

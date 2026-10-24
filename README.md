@@ -78,6 +78,7 @@ Set these values in `.env.local`:
 
 - `VITE_BUILDER_CODE`: public builder code registered for Strike V2 testnet.
 - `VITE_BUILDER_FEE_BPS`: builder fee share. The example sets this to `0`; Strike trading fees may still apply.
+- `VITE_WALLETCONNECT_PROJECT_ID`: optional public WalletConnect Cloud project ID. Installed browser wallets work without it; WalletConnect QR and mobile wallet pairing require it.
 - `DATABASE_URL`: server-only PostgreSQL connection for application queries. A pooler URL is supported.
 - `DATABASE_URL_UNPOOLED`: server-only direct PostgreSQL connection for the scorer’s leader lock.
 - `APP_ORIGIN`: exact browser origin, normally `http://localhost:5173`.
@@ -85,6 +86,7 @@ Set these values in `.env.local`:
 - `TORUNI_MAX_ACCOUNT_EXPOSURE`: maximum gross exposure for positions and Toruni quotes, in USD. It must cover two maximum quotes.
 
 Keep database URLs server-only. Do not prefix them with `VITE_`, which would expose them to the browser. Risk limits must be configured before a round accepts participants.
+For WalletConnect, register `toruni.vercel.app` and your local development origin in the WalletConnect project’s allowed origins, then set its project ID before building.
 
 ```sh
 npm run migrate
