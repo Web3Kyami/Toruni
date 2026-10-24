@@ -16,7 +16,7 @@ export default function WalletRuntime({ openRequest, onStateChange }: WalletRunt
         borderRadius: "medium",
         fontStack: "system",
         overlayBlur: "small",
-      })}>
+      })} modalSize="compact">
         <WalletBridge openRequest={openRequest} onStateChange={onStateChange} />
       </RainbowKitProvider>
     </QueryClientProvider>
@@ -43,7 +43,9 @@ function WalletBridge({ openRequest, onStateChange }: WalletRuntimeProps) {
   }, [address, connector, isConnected, connectModalOpen, disconnectWallet, onStateChange]);
 
   useEffect(() => {
-    if (openRequest > 0 && !isConnected) openConnectModal?.();
+    if (openRequest <= 0 || isConnected) return;
+    const timeout = window.setTimeout(() => openConnectModal?.(), 0);
+    return () => window.clearTimeout(timeout);
   }, [openRequest, isConnected, openConnectModal]);
 
   return null;

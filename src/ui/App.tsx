@@ -165,7 +165,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onChooseWall
         <div className="balance-row"><span>Size</span><strong>{quoteReview.size} BTC</strong></div>
         <div className="balance-row"><span>Order value</span><strong>{formatUsd(quoteReview.notional)}</strong></div>
         <div className="quote-order-terms"><span>Order type</span><strong>Post-only limit</strong><span>Stays open</span><strong>Until you cancel it, even after the round ends</strong></div>
-        <p className="risk-warning">A fill opens a position. Canceling the offer does not close it. Strike trading fees may apply.</p>
+        <p className="risk-warning">A fill opens a position. Canceling the offer does not close it.</p>
         <button className="button button--primary button--wide" onClick={onSubmitQuote} disabled={!canWriteOrders || quoteSubmitting}>
           {quoteSubmitting ? "Sending to Strike…" : "Place offer"}<Icon name="arrow" />
         </button>
@@ -230,13 +230,13 @@ function AppDialog({ kind, onClose, address, account, stage, error, onChooseWall
           {address && <p className="wallet-address"><Icon name="wallet" size={17} />{shortAddress(address)}</p>}
           {error && <p className="inline-error" role="alert"><Icon name="alert" size={17} />{error}</p>}
           {stage === "account-found" && <>
-            <div className="authorization-notice"><Icon name="shield" size={18} /><span>Toruni adds no fee. Strike’s trading fees may apply. This replaces any prior Toruni approval. Approval does not place an offer or deposit funds.</span></div>
+            <div className="authorization-notice"><Icon name="shield" size={18} /><span>This replaces any prior Toruni approval. Approval does not place an offer or deposit funds.</span></div>
             <button className="button button--primary button--wide" onClick={onAuthorize}>
               Authorize Toruni on Strike <Icon name="arrow" />
             </button>
           </>}
           {stage === "new-account" && <>
-            <div className="authorization-notice"><Icon name="shield" size={18} /><span>Toruni adds no fee. Strike’s trading fees may apply. Approval does not place an offer or deposit funds.</span></div>
+            <div className="authorization-notice"><Icon name="shield" size={18} /><span>Approval does not place an offer or deposit funds.</span></div>
             <button className="button button--primary button--wide" onClick={onAuthorize}>
               Continue to wallet signature <Icon name="arrow" />
             </button>
@@ -537,6 +537,7 @@ export function App() {
     setTab("market");
     document.getElementById("market-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
+  const showMobileDock = pathname === "/arena" && !resultsRoundId;
 
   const currentMarketState = marketState === "live" && market?.mark && clock - market.mark.observedAt > 5000 ? "offline" : marketState;
   const currentMarketMessage = marketStatusMessage(marketState, currentMarketState, marketMessage);
@@ -587,7 +588,7 @@ export function App() {
           : risk?.account.symbolSettings?.["BTC-USD"]?.leverage !== 1
             ? "Set BTC-USD to 1x leverage in Strike before joining."
             : Number(risk?.account.available_balance ?? 0) < Number(gamePolicy?.requiredCollateral ?? Infinity)
-              ? `Keep at least ${gamePolicy?.requiredCollateral ?? "the required amount"} available for both offers. Strike fees or open positions may require more.`
+              ? `Keep at least ${gamePolicy?.requiredCollateral ?? "the required amount"} available for both offers. Open positions may require more.`
               : participantJoined
                 ? "You have already joined this challenge."
                 : round && round.status !== "lobby"
@@ -634,6 +635,7 @@ export function App() {
 
   const reviewQuote = async (side: "buy" | "sell") => {
     setNotice("");
+    if (!liveAccount) { openConnect(); return; }
     if (!market?.mark || !market.depth || !market.marketRules || !gamePolicy?.maximumQuoteNotional || !canReviewQuote(side)) {
       setNotice(quoteBlockReason); return;
     }
@@ -751,7 +753,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
+      <header className={`topbar${showMobileDock ? " topbar--with-mobile-dock" : ""}`}>
         <a className="brand" href="/" onClick={(event) => { event.preventDefault(); navigate("/"); }} aria-label="Toruni home">
           <span className="brand-mark"><i /><i /><b /></span>
           <span>TORUNI</span>
@@ -770,7 +772,7 @@ export function App() {
         </button>
       </header>
 
-      <main id="top" className={`page-content${resultsRoundId ? "" : " page-content--has-dock"}`}>
+      <main id="top" className={`page-content${showMobileDock ? " page-content--has-dock" : ""}`}>
         {resultsRoundId ? <Results roundId={resultsRoundId} onBack={() => navigate("/")} onRules={() => setDialog("rules")}
           myOrders={roundData.participant?.roundId === resultsRoundId ? roundData.orders : []}
           canCancel={liveAccount} cancelingOrderIds={cancelingOrderIds}
@@ -822,7 +824,6 @@ export function App() {
               <div className="round-left">
                 <span className="panel-kicker">{round ? round.status.replaceAll("_", " ") : "NO ACTIVE ROUND"}</span>
                 <div className="round-title-row"><h2>Two sides. One score.</h2><span className="round-length"><Icon name="clock" size={14} /> {countdown ?? "180 SEC"}</span></div>
-                {!round && <p>The first eligible maker starts a three-minute round.</p>}
               </div>
               <button className="button button--join" onClick={() => {
                 if (participantJoined || round?.status === "active") { navigate("/arena"); setTab("quotes"); }
@@ -850,7 +851,7 @@ export function App() {
                 const openOrder = order?.exchange_status === "open" && order.intent_status === "observed"
                   && order.exchange_order_id && /^[1-9]\d{0,18}$/.test(order.exchange_order_id) ? order : null;
                 return <QuoteCard key={side} side={side === "buy" ? "bid" : "ask"} value={quoteDrafts[side]}
-                  status={status} statusState={statusState} canReview={canReviewQuote(side)} disabledReason={quoteBlockReason}
+                  status={status} statusState={statusState} canReview={canReviewQuote(side)}
                   openOrder={openOrder} canRequote={Boolean(liveAccount && round?.status === "active" && roundData.health === "current")}
                   onRequote={startRequote}
                   onChange={(field, value) => setQuoteDrafts(previous => ({ ...previous, [side]: { ...previous[side], [field]: value } }))}
@@ -888,7 +889,7 @@ export function App() {
         </footer>
       </main>
 
-      {!resultsRoundId && <div className="mobile-order-bar">
+      {showMobileDock && <div className="mobile-order-bar">
         <button onClick={() => setDialog("orders")}><Icon name="book" size={16} /> My orders <span>{roundData.orders.length || "—"}</span></button>
         <button onClick={openConnect} disabled={pickerLoading}><Icon name="wallet" size={16} />{pickerLoading ? "Opening…" : liveAccount ? "Account" : "Connect"}</button>
       </div>}
@@ -933,7 +934,7 @@ export function App() {
   );
 }
 
-function QuoteCard({ side, onReview, value, onChange, status, statusState, canReview, disabledReason, openOrder, canRequote, onRequote }: {
+function QuoteCard({ side, onReview, value, onChange, status, statusState, canReview, openOrder, canRequote, onRequote }: {
   side: "bid" | "ask";
   onReview: () => void;
   value: { price: string; size: string };
@@ -941,7 +942,6 @@ function QuoteCard({ side, onReview, value, onChange, status, statusState, canRe
   status: string;
   statusState: "live" | "waiting" | "paused";
   canReview: boolean;
-  disabledReason: string;
   openOrder: ObservedOrder | null;
   canRequote: boolean;
   onRequote: (order: ObservedOrder) => void;
@@ -956,13 +956,11 @@ function QuoteCard({ side, onReview, value, onChange, status, statusState, canRe
       <label>PRICE <span>USD</span><div className="input-shell"><span>$</span><input aria-label={`${isBid ? "Bid" : "Ask"} price`} inputMode="decimal" value={value.price} onChange={event => onChange("price", event.target.value)} disabled={!canReview} /></div></label>
       <label>SIZE <span>BTC</span><div className="input-shell"><input aria-label={`${isBid ? "Bid" : "Ask"} size`} inputMode="decimal" value={value.size} onChange={event => onChange("size", event.target.value)} disabled={!canReview} /><span>BTC</span></div></label>
     </div>
-    {!openOrder && !canReview && <p id={`quote-disabled-${side}`} className="quote-disabled-reason"><Icon name="alert" size={14} />{disabledReason}</p>}
     {openOrder
       ? <button className={`button quote-button quote-button--${side}`} onClick={() => onRequote(openOrder)} disabled={!canRequote}>
         Requote {isBid ? "bid" : "ask"} <Icon name="arrow" size={15} />
       </button>
-      : <button className={`button quote-button quote-button--${side}`} onClick={onReview} disabled={!canReview}
-        aria-describedby={!canReview ? `quote-disabled-${side}` : undefined}>
+      : <button className={`button quote-button quote-button--${side}`} onClick={onReview}>
         Review {isBid ? "bid" : "ask"} <Icon name="arrow" size={15} />
       </button>}
   </article>;

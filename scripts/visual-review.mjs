@@ -53,11 +53,18 @@ export async function runVisualReview(port) {
       }
       const badge = document.querySelector('.network-badge')?.innerText ?? '';
       const otherEnvironmentLabels = document.body.innerText.replace(badge,'').match(/\\b(testnet|mainnet|devnet|sandbox)\\b/gi) ?? [];
-      return {visibleTextCount:[...document.querySelectorAll('body *')].filter(el => visible(el) && hasText(el)).length,below14,otherEnvironmentLabels};
+      const feeCaveats = document.body.innerText.match(/Strike(?:’|'s)? trading fees may apply|Toruni adds no fee/gi) ?? [];
+      const disabledQuoteHelper = Boolean(document.querySelector('.quote-disabled-reason'));
+      const basisPointLabels = document.body.innerText.match(/\b(?:bps|basis points)\b/gi) ?? [];
+      const mockWalletLabels = document.body.innerText.match(/\b(?:viewer wallet|wallet [ab]|review wallet|test wallet)\b/gi) ?? [];
+      const connectActions = [...document.querySelectorAll('.topbar > .button--connect,.mobile-order-bar button:last-child')].filter(visible).length;
+      return {visibleTextCount:[...document.querySelectorAll('body *')].filter(el => visible(el) && hasText(el)).length,below14,otherEnvironmentLabels,feeCaveats,disabledQuoteHelper,basisPointLabels,mockWalletLabels,connectActions};
     })()`);
     await call('Page.enable');
     const evidence = [];
-    for (const width of [360, 390, 1440]) {
+    const requestedWidths = process.env.TORUNI_VISUAL_WIDTHS?.split(',').map(Number).filter(width => Number.isInteger(width) && width > 0);
+    const widths = requestedWidths?.length ? requestedWidths : [360, 390, 1440];
+    for (const width of widths) {
       await call('Emulation.setDeviceMetricsOverride', { width, height: width === 360 ? 640 : width === 390 ? 844 : 1100, deviceScaleFactor: 1, mobile: width < 768 });
       for (const route of ['/', '/arena?mode=spectate', '/results/00000000-0000-0000-0000-000000000000']) {
         console.info('Visual review route:',width,route);
@@ -70,6 +77,7 @@ export async function runVisualReview(port) {
         const copyAudit = await auditVisibleText();
         if (copyAudit.below14.length) throw new Error('Visible text under 14px: '+JSON.stringify(copyAudit.below14));
         if (copyAudit.otherEnvironmentLabels.length) throw new Error('Repeated environment labels: '+JSON.stringify(copyAudit.otherEnvironmentLabels));
+        if (copyAudit.feeCaveats.length || copyAudit.disabledQuoteHelper || copyAudit.basisPointLabels.length || copyAudit.mockWalletLabels.length || copyAudit.connectActions !== 1) throw new Error('Unwanted helper, test-only copy, or duplicate/missing connection action is visible: '+JSON.stringify(copyAudit));
         evidence.push({ route, width, copyAudit });
         const label = route === '/' ? 'lobby' : route.startsWith('/arena') ? 'arena' : 'results-not-found';
         const capture = async name => {
@@ -78,13 +86,27 @@ export async function runVisualReview(port) {
         };
         await capture(label);
         if (route === '/') {
-          const blocker = await evaluate(`(() => {
+          const quoteAction = await evaluate(`(() => {
             const button = [...document.querySelectorAll('.quote-button')].find(item => item.textContent.includes('Review bid'));
-            const reason = document.querySelector('#quote-disabled-bid');
-            return button && reason && button.disabled && button.getAttribute('aria-describedby') === reason.id ? reason.innerText.trim() : '';
+            const helper = document.querySelector('.quote-disabled-reason');
+            if (!button) return {buttonFound:false,buttonEnabled:false,helperVisible:Boolean(helper)};
+            button.click();
+            return {buttonFound:true,buttonEnabled:!button.disabled,helperVisible:Boolean(helper)};
           })()`);
-          if (!blocker) throw new Error('A disabled offer review is missing its visible explanation');
-          evidence.push({screen:'blocked-offer-review',width,blocker});
+          if (!quoteAction.buttonFound || !quoteAction.buttonEnabled || quoteAction.helperVisible) throw new Error('Offer review should be actionable without a pre-click explanation: '+JSON.stringify(quoteAction));
+          let nextStep = null;
+          for (let wait = 0; wait < 30; wait++) {
+            nextStep = await evaluate(`({notice:document.querySelector('.quote-notice')?.textContent?.trim()??null,dialog:document.querySelector('#dialog-title')?.textContent??null,walletModal:Boolean(document.querySelector('[data-rk] [role=dialog]'))})`);
+            if (nextStep.notice || nextStep.dialog || nextStep.walletModal) break;
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+          if (!nextStep.notice && !nextStep.dialog && !nextStep.walletModal) throw new Error('Offer review did not open the next action or show a current blocker.');
+          await new Promise(resolve => setTimeout(resolve, 650));
+          await capture('review-next-step');
+          evidence.push({screen:'blocked-offer-review',width,...quoteAction,nextStep});
+          await call('Input.dispatchKeyEvent', {type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+          await call('Input.dispatchKeyEvent', {type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
         evidence.push({ route, width, viewport, horizontalOverflow: await evaluate('document.documentElement.scrollWidth > innerWidth'),
           heading: await evaluate('document.querySelector("h1")?.textContent'),
@@ -106,18 +128,20 @@ export async function runVisualReview(port) {
             ['rules', '[...document.querySelectorAll("button")].find(b => /Scoring rules|Rules & scoring/.test(b.textContent) && b.getClientRects().length)?.click()'],
             ['risk', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Margin and positions"))?.click()'],
             ['join', '[...document.querySelectorAll("button")].find(b => /Start challenge|Join challenge/.test(b.textContent) && b.getClientRects().length)?.click()'],
-            ['wallet', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Connect wallet"))?.click()'],
+            ['wallet', '[...document.querySelectorAll(".mobile-order-bar button:last-child,.topbar .button--connect")].find(b => b.getClientRects().length)'],
             ['orders', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Open order details"))?.click()'],
           ]) {
             const rect = await evaluate(`(() => {const button=${expression.replace('?.click()', '')}; if(!button) return null;button.scrollIntoView({block:'center',behavior:'instant'});const r=button.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
             if (!rect) throw new Error('Missing '+name+' action');
             await call('Input.dispatchMouseEvent', {type:'mousePressed',...rect,button:'left',clickCount:1});
             await call('Input.dispatchMouseEvent', {type:'mouseReleased',...rect,button:'left',clickCount:1});
-            await new Promise(resolve => setTimeout(resolve, 150));
+            await new Promise(resolve => setTimeout(resolve, 650));
             if (!await evaluate('!!document.querySelector("[role=dialog]")')) throw new Error(name+' dialog did not open');
             await capture(name);
-            const box = await evaluate(`(() => {const d=document.querySelector('[role=dialog]');const r=d.getBoundingClientRect();return {height:r.height,width:r.width,top:r.top,bottom:r.bottom,viewport:innerHeight,fontLoaded:document.fonts.check('500 16px "Plus Jakarta Sans"')}})()`);
-            if(box.height < 240 || box.top < 0 || box.bottom > box.viewport+1) throw new Error('Collapsed or clipped '+name+' sheet: '+JSON.stringify(box));
+            const usesWalletPicker = name === 'join' || name === 'wallet';
+            const box = await evaluate(`(() => {const d=${usesWalletPicker ? "document.querySelector('[data-rk] [role=document]')" : "document.querySelector('.modal')"};if(!d)return null;const r=d.getBoundingClientRect();return {height:r.height,width:r.width,top:r.top,bottom:r.bottom,viewport:innerHeight,viewportWidth:innerWidth,fontLoaded:document.fonts.check('500 16px "Plus Jakarta Sans"')}})()`);
+            const minimumHeight = usesWalletPicker ? 160 : 240;
+            if(!box || box.height < minimumHeight || box.width > box.viewportWidth+1 || box.top < 0 || box.bottom > box.viewport+1) throw new Error('Collapsed or clipped '+name+' sheet: '+JSON.stringify(box));
             const dialogCopyAudit = await auditVisibleText();
             if (dialogCopyAudit.below14.length) throw new Error(name+' dialog has visible text under 14px: '+JSON.stringify(dialogCopyAudit.below14));
             if (dialogCopyAudit.otherEnvironmentLabels.length) throw new Error(name+' dialog repeats environment labels: '+JSON.stringify(dialogCopyAudit.otherEnvironmentLabels));

@@ -146,8 +146,6 @@ h1 em { font-style: normal; color: var(--lime); }
 .quote-meta span:first-child { display: inline-flex; align-items: center; gap: 4px; color: var(--cyan); }
 .quote-button { width: 100%; min-height: 44px; margin-top: 13px; border-color: var(--control-border); background: #1a2633; color: #c7d1dc; font-size: 14px; }
 .quote-button--ask { background: #211f2a; }
-.quote-disabled-reason { display: flex; align-items: flex-start; gap: 5px; min-height: 25px; margin: 8px 0 0; color: #9aa9ba; font-size: 14px; line-height: 1.4; }
-.quote-disabled-reason svg { flex: 0 0 auto; color: var(--amber); }
 .quote-safety { display: flex; align-items: center; gap: 7px; margin: 11px 2px 0; color: var(--dim); font-size: 16px; line-height: 1.5; }
 .quote-order-terms { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 6px 16px; margin-top: 16px; padding: 14px 0; border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); font-size: 16px; line-height: 1.45; }
 .quote-order-terms span { color: var(--muted); }
@@ -274,6 +272,7 @@ h1 em { font-style: normal; color: var(--lime); }
 
 @media (max-width: 767px) {
   .topbar { height: 58px; gap: 11px; padding: 0 15px; }
+  .topbar--with-mobile-dock > .button--connect { display: none; }
   .brand { font-size: 14px; gap: 7px; }
   .brand-mark { transform: scale(.84) skewY(-9deg); transform-origin: left center; width: 22px; }
   .topbar-divider, .topbar-context, .topbar > .status-pill { display: none; }
@@ -313,7 +312,6 @@ h1 em { font-style: normal; color: var(--lime); }
   .quote-fields { margin-top: 15px; }
   .input-shell { min-height: 42px; }
   .quote-button { min-height: 42px; }
-  .quote-disabled-reason { min-height: auto; font-size: 14px; }
   .quote-safety { align-items: flex-start; font-size: 16px; line-height: 1.5; }
   .lower-grid { grid-template-columns: 1fr; margin-top: 16px; }
   .score-panel, .order-panel { min-height: 145px; }
@@ -389,7 +387,7 @@ h1 em { font-style: normal; color: var(--lime); }
   .intro-action-secondary { font-size:16px; }
   .feed-banner { font-size: 14px; }
   .mobile-tab { font-size: 14px; }
-  .round-left p,.quote-disabled-reason,.quote-safety { font-size: 16px; line-height:1.5; }
+  .round-left p,.quote-safety { font-size: 16px; line-height:1.5; }
   .quote-fields label { font-size: 16px; }
   .input-shell input { font-size: 16px; }
   .text-button { min-height:44px; font-size: 16px; }
@@ -449,7 +447,7 @@ h1 em { font-style: normal; color: var(--lime); }
   .dialog-overlay, .dialog-overlay--side { align-items: flex-end; padding: 12px; }
   .dialog-overlay .modal { width: 100%; height: auto; min-height: 280px; max-height: calc(var(--sheet-height, 100dvh) - 24px); padding: 20px; border-radius: 18px; padding-bottom: max(24px, env(safe-area-inset-bottom)); }
   .button, .button--connect, .button--ghost, .intro-actions .button, .quote-button, .mobile-order-bar button { font-size: 16px; min-height: 44px; }
-  .intro-copy, .round-left p, .quote-disabled-reason, .quote-safety, .score-context, .standings-empty p, .trust-panel p, .empty-orders p { font-size: 16px; line-height: 1.55; }
+  .intro-copy, .round-left p, .quote-safety, .score-context, .standings-empty p, .trust-panel p, .empty-orders p { font-size: 16px; line-height: 1.55; }
   .score-status, .empty-orders small { font-size: 14px; line-height: 1.5; }
   .mobile-tab { font-size: 16px; }
   .panel-kicker, .metric-label, .network-badge, .status-pill, .quote-card-top .status-pill { font-size: 14px; letter-spacing: .035em; }

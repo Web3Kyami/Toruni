@@ -2,6 +2,8 @@
 
 Toruni is a 180-second market-making challenge for BTC-USD. Players practice providing liquidity by placing a bid and an ask, then earn points while their quotes stay open and competitive.
 
+Toruni currently supports BTC-USD. As Strike adds markets to its V2 testnet, we plan to add them to the challenge.
+
 [Open the arena](https://toruni.vercel.app/) · [How a round works](#a-round) · [Run locally](#run-locally)
 
 ![Toruni lobby with the live BTC-USD market, bid and ask controls, and round standings](docs/images/toruni-lobby.png)
