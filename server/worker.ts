@@ -6,10 +6,10 @@ import { advanceRound, type RoundStatus } from "../shared/roundLifecycle.ts";
 import { formatDecimal, multiplyDecimals, parseDecimal } from "../shared/decimal.ts";
 import { publishEvent } from "./events.ts";
 import { drainWorkerTasks } from "./workerRuntime.ts";
+import { nextOrderPollDelay } from "./workerTiming.ts";
 import type { StrikeMarketRules } from "../shared/contracts.ts";
 
 const WORKER_STOP_DRAIN_MS = 10_000;
-
 export interface RoundWorkerHandle {
   ready: Promise<boolean>;
   stop: () => Promise<void>;
@@ -177,7 +177,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
         })
         .finally(() => {
           orderTask = null;
-          if (activeRoundId === roundId) scheduleOrderPoll(Math.max(0, 2_000 - (Date.now() - startedAt)));
+          if (activeRoundId === roundId) scheduleOrderPoll(nextOrderPollDelay(Date.now() - startedAt));
         });
     }, Math.max(0, delayMs));
   };
