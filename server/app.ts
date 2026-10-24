@@ -26,7 +26,12 @@ function queryValue(url: URL, key: string): string | null {
   return value ? value : null;
 }
 
-export async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+export interface RoundScoringHooks {
+  onRoundJoined?: (roundId: string) => void;
+  onCurrentRound?: (roundId: string, status: string) => Promise<void> | void;
+}
+
+export async function handle(request: IncomingMessage, response: ServerResponse, scoringHooks?: RoundScoringHooks): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://api-v2-testnet.strikefinance.org wss://api-v2-testnet.strikefinance.org; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
   response.setHeader("Referrer-Policy", "no-referrer");
@@ -65,6 +70,7 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
           effectiveLeverage: risk.account.symbolSettings?.["BTC-USD"]?.leverage ?? 0,
           provenance: "strike-independent-read",
         }, policy.rules, now));
+        try { scoringHooks?.onRoundJoined?.(result.roundId); } catch { /* The current-round poll can retry dispatch. */ }
         sendJson(response, 201, result); return;
       }
 
@@ -139,7 +145,12 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
       sendJson(response, 200, await readParticipantSnapshot(session)); return;
     }
     if (url.pathname === "/api/rounds/current") {
-      sendJson(response, 200, await readCurrentRound()); return;
+      const current = await readCurrentRound();
+      if (current.round && scoringHooks?.onCurrentRound) {
+        try { await scoringHooks.onCurrentRound(current.round.id, current.round.status); }
+        catch { /* Current-round state stays available; the next poll can retry dispatch. */ }
+      }
+      sendJson(response, 200, current); return;
     }
     const reportRoute = url.pathname.match(/^\/api\/rounds\/([0-9a-f-]{36})\/(results|audit|leaderboard)$/i);
     if (reportRoute) {

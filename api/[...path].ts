@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { waitUntil } from "@vercel/functions";
-import { handle } from "../server/app.ts";
-import { readCurrentRound, readScoringHeartbeat } from "../server/database.ts";
+import { handle, type RoundScoringHooks } from "../server/app.ts";
+import { readScoringHeartbeat } from "../server/database.ts";
 import { runRoundWorkerForRound } from "../server/worker.ts";
 import { shouldDispatchRoundScorer } from "../server/scoringDispatch.ts";
 
@@ -33,16 +33,24 @@ function scheduleScoring(roundId: string): void {
   waitUntil(task);
 }
 
-async function resumeStaleScoring(): Promise<void> {
-  const current = await readCurrentRound();
-  if (!current.round) return;
-  const heartbeat = await readScoringHeartbeat(current.round.id);
-  if (shouldDispatchRoundScorer({ platformIsVercel: true, method: "GET", pathname: "/api/rounds/current",
-    responseStatus: 200, roundStatus: current.round.status, heartbeatAt: heartbeat, now: Date.now() })) {
-    process.stderr.write("Toruni stale scoring heartbeat detected; resuming the round worker.\n");
-    scheduleScoring(current.round.id);
-  }
-}
+const scoringHooks: RoundScoringHooks | undefined = process.env.VERCEL ? {
+  onRoundJoined(roundId) {
+    if (shouldDispatchRoundScorer({ platformIsVercel: true, method: "POST", pathname: "/api/rounds/current/join",
+      responseStatus: 201, now: Date.now() })) scheduleScoring(roundId);
+  },
+  async onCurrentRound(roundId, roundStatus) {
+    try {
+      const heartbeat = await readScoringHeartbeat(roundId);
+      if (shouldDispatchRoundScorer({ platformIsVercel: true, method: "GET", pathname: "/api/rounds/current",
+        responseStatus: 200, roundStatus, heartbeatAt: heartbeat, now: Date.now() })) {
+        process.stderr.write("Toruni stale scoring heartbeat detected; resuming the round worker.\n");
+        scheduleScoring(roundId);
+      }
+    } catch (error) {
+      process.stderr.write(`Toruni scorer dispatch check failed (${scoringFailureCode(error)}).\n`);
+    }
+  },
+} : undefined;
 
 export default async function api(request: IncomingMessage, response: ServerResponse): Promise<void> {
   // The browser already polls persisted state. Process-local SSE subscribers
@@ -53,21 +61,7 @@ export default async function api(request: IncomingMessage, response: ServerResp
     return;
   }
   try {
-    await handle(request, response);
-    if (process.env.VERCEL) {
-      try {
-        const pathname = new URL(request.url ?? "/", "https://toruni.invalid").pathname;
-        const joined = shouldDispatchRoundScorer({ platformIsVercel: true, method: request.method ?? "", pathname,
-          responseStatus: response.statusCode, now: Date.now() });
-        const pollingCurrentRound = request.method === "GET" && pathname === "/api/rounds/current" && response.statusCode === 200;
-        if (joined) {
-          const current = await readCurrentRound();
-          if (current.round) scheduleScoring(current.round.id);
-        } else if (pollingCurrentRound) await resumeStaleScoring();
-      } catch (error) {
-        process.stderr.write(`Toruni scorer dispatch check failed (${scoringFailureCode(error)}).\n`);
-      }
-    }
+    await handle(request, response, scoringHooks);
   } catch {
     if (!response.headersSent) response.writeHead(503, {
       "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store",
