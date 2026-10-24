@@ -7,6 +7,10 @@ const pool = process.env.DATABASE_URL ? new Pool({
   max: 4,
   connectionTimeoutMillis: 3_000,
   idleTimeoutMillis: 30_000,
+  query_timeout: 6_000,
+  statement_timeout: 5_000,
+  lock_timeout: 2_000,
+  idle_in_transaction_session_timeout: 10_000,
 }) : null;
 const configuredDatabaseUrl = process.env.DATABASE_URL;
 const configuredDatabaseIsPooler = (() => {
@@ -21,6 +25,10 @@ const leaderPool = leaderConnectionString ? new Pool({
   max: 1,
   connectionTimeoutMillis: 3_000,
   idleTimeoutMillis: 30_000,
+  query_timeout: 6_000,
+  statement_timeout: 5_000,
+  lock_timeout: 2_000,
+  idle_in_transaction_session_timeout: 10_000,
 }) : null;
 pool?.on("error", () => { process.stderr.write("Toruni database connection interrupted.\n"); });
 leaderPool?.on("error", () => { process.stderr.write("Toruni scoring leader connection interrupted.\n"); });
@@ -120,8 +128,16 @@ export async function acquireScoringLeader(): Promise<{ held: () => boolean; rel
     return {
       held: () => held,
       release: async () => {
-        if (held) await client.query("SELECT pg_advisory_unlock(hashtext('toruni-single-score-leader'))");
-        held = false; client.removeListener("error", interrupted); client.release();
+        const shouldUnlock = held;
+        held = false;
+        client.removeListener("error", interrupted);
+        try {
+          if (shouldUnlock) await client.query("SELECT pg_advisory_unlock(hashtext('toruni-single-score-leader'))");
+          client.release();
+        } catch (error) {
+          client.release(error instanceof Error ? error : new Error("Scoring leader connection failed."));
+          throw error;
+        }
       },
     };
   } catch (error) { client.release(); throw error; }

@@ -5,7 +5,10 @@ import { finalizeRoundResults, persistScoreTick } from "./scorePersistence.ts";
 import { advanceRound, type RoundStatus } from "../shared/roundLifecycle.ts";
 import { formatDecimal, multiplyDecimals, parseDecimal } from "../shared/decimal.ts";
 import { publishEvent } from "./events.ts";
+import { drainWorkerTasks } from "./workerRuntime.ts";
 import type { StrikeMarketRules } from "../shared/contracts.ts";
+
+const WORKER_STOP_DRAIN_MS = 10_000;
 
 export interface RoundWorkerHandle {
   ready: Promise<boolean>;
@@ -43,6 +46,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
   const markReady = (acquired: boolean) => {
     if (!readySettled) { readySettled = true; resolveReady(acquired); }
   };
+  const mayWrite = () => !stopped && Boolean(leader?.held());
 
   const resetContinuity = async () => {
     await query(`UPDATE quote_intents SET first_open_observed_at=NULL,last_verified_at=NULL,
@@ -61,7 +65,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
         lastMarkPoll = now;
         jobs.push((async () => {
           const mark = await readFreshMark();
-          if (mark) await query(`INSERT INTO market_observations (round_id,observed_at,exchange_event_at,mark,source,data_status)
+          if (mark && mayWrite()) await query(`INSERT INTO market_observations (round_id,observed_at,exchange_event_at,mark,source,data_status)
             VALUES ($1,$2,$3,$4,'strike-v2-testnet','healthy')`, [roundId, new Date(), new Date(mark.observedAt), mark.markPrice]);
         })());
       }
@@ -78,8 +82,9 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
               clientOrderId: intent.client_order_id as string, symbol: intent.market as string, side: intent.side as "buy" | "sell",
               firstOpenObservedAt: intent.first_open_observed_at instanceof Date ? intent.first_open_observed_at.getTime() : null,
               lastVerifiedAt: intent.last_verified_at instanceof Date ? intent.last_verified_at.getTime() : undefined });
+            if (!mayWrite()) return;
             if (result.kind === "observed") {
-              await transaction(client => recordOrderObservation(client, result.quote));
+              await transaction(client => mayWrite() ? recordOrderObservation(client, result.quote) : Promise.resolve());
             } else {
               const failures = Number(intent.verification_failures) + 1;
               const code = result.kind === "unavailable" ? `strike-${result.status}` : result.kind;
@@ -114,7 +119,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
               const scale = Math.max(exposure.scale, notional.scale);
               exposure = { coefficient: exposure.coefficient * 10n ** BigInt(scale - exposure.scale) + notional.coefficient * 10n ** BigInt(scale - notional.scale), scale };
             }
-            if (supported) await query(`INSERT INTO risk_observations (round_id,participant_id,observed_at,absolute_exposure,available_collateral,source,symbol_leverage)
+            if (supported && mayWrite()) await query(`INSERT INTO risk_observations (round_id,participant_id,observed_at,absolute_exposure,available_collateral,source,symbol_leverage)
               VALUES ($1,$2,$3,$4,$5,'strike-independent-read',1)`, [roundId, participant.id, new Date(), formatDecimal(exposure), account.available_balance]);
             } catch { /* Missing risk evidence pauses this participant without starving other accounts. */ }
           }
@@ -165,6 +170,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
       stage = "round transition";
       const next = advanceRound({ status: round.status as RoundStatus, startsAt: (round.starts_at as Date).getTime(),
         endsAt: (round.ends_at as Date).getTime(), settlementDeadline: (round.settlement_deadline as Date).getTime() }, now, pending[0]?.count === "0");
+      if (!mayWrite()) return;
       if (round.status === "active" && now < (round.ends_at as Date).getTime() + 1000 && leader.held()) {
         stage = "score sampling";
         const startsAt = (round.starts_at as Date).getTime();
@@ -174,13 +180,19 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
         const participants = await query("SELECT id FROM participants WHERE round_id=$1 AND verification_state='verified' LIMIT 8", [round.id]);
         const minimum = engineRules && now >= engineRules.observedAt && now - engineRules.observedAt <= 30_000
           && engineRules.status === "trading" && !engineRules.reduceOnly ? engineRules.minimumNotional : null;
-        for (const participant of participants) await transaction(client => persistScoreTick(client, round.id as string, participant.id as string, sampledAt, minimum));
+        for (const participant of participants) {
+          if (!mayWrite()) break;
+          await transaction(async client => {
+            if (mayWrite()) await persistScoreTick(client, round.id as string, participant.id as string, sampledAt, minimum);
+          });
+        }
         }
       }
       if (next.changed) await query("UPDATE rounds SET status=$1 WHERE id=$2", [next.status, round.id]);
+      if (!mayWrite()) return;
       if (["completed", "review_required"].includes(next.status)) {
         stage = "result finalization";
-        await transaction(client => finalizeRoundResults(client, round.id as string, now));
+        await transaction(client => mayWrite() ? finalizeRoundResults(client, round.id as string, now) : Promise.resolve());
       }
       if (now - lastPublished >= 1000 || next.changed) {
         lastPublished = now;
@@ -205,9 +217,11 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
     stopped = true;
     if (timer) clearTimeout(timer);
     if (!readySettled) markReady(false);
-    await cycleTask;
-    await collectionTask;
-    await leader?.release(); leader = null;
+    const drained = await drainWorkerTasks([cycleTask, collectionTask], WORKER_STOP_DRAIN_MS);
+    if (!drained) process.stderr.write("Toruni scorer released its leader after the shutdown drain limit.\n");
+    const currentLeader = leader;
+    leader = null;
+    await currentLeader?.release();
   };
   return { ready, stop };
 }
