@@ -1,22 +1,17 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { darkTheme, RainbowKitProvider, useConnectModal } from "@rainbow-me/rainbowkit";
+import { RainbowKitProvider, useConnectModal } from "@rainbow-me/rainbowkit";
 import { WagmiProvider, useAccount, useDisconnect } from "wagmi";
 import { walletConfig } from "../api/walletConfig";
 import type { WalletRuntimeProps } from "./WalletConnectionProvider";
 import "@rainbow-me/rainbowkit/styles.css";
+import "./theme.css";
 
 export default function WalletRuntime({ openRequest, onStateChange }: WalletRuntimeProps) {
   const queryClient = useMemo(() => new QueryClient(), []);
   return <WagmiProvider config={walletConfig}>
     <QueryClientProvider client={queryClient}>
-      <RainbowKitProvider theme={darkTheme({
-        accentColor: "#b5ef55",
-        accentColorForeground: "#11180a",
-        borderRadius: "medium",
-        fontStack: "system",
-        overlayBlur: "small",
-      })} modalSize="compact">
+      <RainbowKitProvider theme={null} modalSize="compact">
         <WalletBridge openRequest={openRequest} onStateChange={onStateChange} />
       </RainbowKitProvider>
     </QueryClientProvider>

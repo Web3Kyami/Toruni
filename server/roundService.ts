@@ -9,7 +9,7 @@ export class RoundGuardError extends Error {
   constructor(message: string, status = 409) { super(message); this.status = status; }
 }
 export interface RoundRules {
-  symbol: "BTC-USD";
+  symbol: string;
   minimumRemainingNotional: string;
   maximumQuoteNotional: string;
   maximumAccountExposure: string;
@@ -52,6 +52,7 @@ export async function enrollParticipant(client: PoolClient, sessionHash: string,
       [randomUUID(), rules.symbol, new Date(now), new Date(now + 15_000), new Date(now + 195_000),
         new Date(now + 210_000), scoringConstants.version, JSON.stringify(rules)])).rows[0];
   }
+  if (round.market !== rules.symbol) throw new RoundGuardError("This round uses another market. Refresh the arena before joining.");
   if (round.status !== "lobby" || now >= (round.starts_at as Date).getTime()) throw new RoundGuardError("This round has started. Watch it and join the next round.");
   const enrolled = await client.query(`SELECT id FROM participants WHERE round_id = $1 AND (session_hash = $2 OR claimed_account_id = $3)`,
     [round.id, sessionHash, admission.accountId]);
@@ -65,7 +66,7 @@ export async function enrollParticipant(client: PoolClient, sessionHash: string,
 }
 
 export async function issueQuoteIntent(client: PoolClient, sessionHash: string, side: StrikeSide, now: number,
-  risk?: { availableBalance: string; currentAbsoluteExposure: string; requestedNotional: string; maximumAccountExposure: string; price: string; size: string }) {
+  risk?: { symbol: string; availableBalance: string; currentAbsoluteExposure: string; requestedNotional: string; maximumAccountExposure: string; price: string; size: string }) {
   if (side !== "buy" && side !== "sell") throw new RoundGuardError("Choose bid or ask.", 400);
   // Match the scorer's round-first lock order before locking a participant or its quote intents.
   const lockedRound = await client.query(`SELECT r.id FROM rounds r JOIN participants p ON p.round_id=r.id
@@ -80,6 +81,7 @@ export async function issueQuoteIntent(client: PoolClient, sessionHash: string, 
     throw new RoundGuardError("Join an active round before requesting an order intent.");
   }
   if (!risk) throw new RoundGuardError("Refresh Strike balance and positions before reviewing this quote.", 423);
+  if (risk.symbol !== row.market) throw new RoundGuardError("The round market changed. Review your quote again.");
   const availableBalance = parseDecimal(risk.availableBalance);
   const currentExposure = parseDecimal(risk.currentAbsoluteExposure);
   const requestedNotional = parseDecimal(risk.requestedNotional);

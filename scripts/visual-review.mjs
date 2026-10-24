@@ -65,7 +65,7 @@ export async function runVisualReview(port) {
     const requestedWidths = process.env.TORUNI_VISUAL_WIDTHS?.split(',').map(Number).filter(width => Number.isInteger(width) && width > 0);
     const widths = requestedWidths?.length ? requestedWidths : [360, 390, 1440];
     for (const width of widths) {
-      await call('Emulation.setDeviceMetricsOverride', { width, height: width === 360 ? 640 : width === 390 ? 844 : 1100, deviceScaleFactor: 1, mobile: width < 768 });
+      await call('Emulation.setDeviceMetricsOverride', { width, height: width === 360 ? 640 : width === 390 ? 844 : 1000, deviceScaleFactor: 1, mobile: width < 768 });
       for (const route of ['/', '/arena?mode=spectate', '/results/00000000-0000-0000-0000-000000000000']) {
         console.info('Visual review route:',width,route);
         await call('Page.navigate', { url: `${applicationOrigin}${route}` });
@@ -86,8 +86,52 @@ export async function runVisualReview(port) {
         };
         await capture(label);
         if (route === '/') {
+          for (const symbol of ['ETH-USD', 'SOL-USD']) {
+            const selected = await evaluate(`(() => {const select=document.querySelector('#arena-market'); if(!select)return null; select.value='${symbol}'; select.dispatchEvent(new Event('change',{bubbles:true})); return select.value;})()`);
+            if (selected !== symbol) throw new Error('Market selector did not activate '+symbol);
+            await new Promise(resolve => setTimeout(resolve, 400));
+            await capture(`market-${symbol.toLowerCase().split('-')[0]}`);
+          }
+          if (width < 768) await evaluate(`[...document.querySelectorAll('.mobile-tab')].find(b=>b.textContent.trim().toLowerCase()==='standings')?.click()`);
+          await evaluate(`(() => {const select=document.querySelector('#arena-market'); select.value='BTC-USD'; select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+          await new Promise(resolve => setTimeout(resolve, 1200));
+          const activityState = await evaluate(`(() => {const scroller=document.querySelector('.activity-scroll');const rows=[...document.querySelectorAll('.activity-list li')];const rect=scroller?.getBoundingClientRect();const visibleRows=rect?rows.filter(row=>{const r=row.getBoundingClientRect();return r.bottom>rect.top&&r.top<rect.bottom}).length:0;return {rows:rows.length,visibleRows,clientHeight:scroller?.clientHeight??null,scrollHeight:scroller?.scrollHeight??null,maxHeight:scroller?getComputedStyle(scroller).maxHeight:null,overflowY:scroller?getComputedStyle(scroller).overflowY:null}})()`);
+          await capture('market-btc-activity');
+          if (activityState.rows && (activityState.rows > 4 ? activityState.visibleRows !== 4 || activityState.scrollHeight <= activityState.clientHeight : activityState.visibleRows !== activityState.rows)) throw new Error('BTC activity viewport does not show up to four real entries with scrolling: '+JSON.stringify(activityState));
+          evidence.push({screen:'market-btc-activity',width,activityState});
+          if (width < 768) await evaluate(`[...document.querySelectorAll('.mobile-tab')].find(b=>b.textContent.trim().toLowerCase()==='quotes')?.click()`);
+          const marketChecks = await evaluate(`(() => {
+            const trend=document.querySelector('.market-trend');
+            const review=document.querySelector('.quote-button');
+            const label=document.querySelector('.market-toolbar label');
+            const value=document.querySelector('.market-toolbar select');
+            const transient=document.querySelectorAll('.feed-banner').length;
+            const activity=document.querySelector('.activity-scroll');
+            const quoteLabel=document.querySelector('.quote-fields label');
+            const quoteValue=document.querySelector('.input-shell input');
+            return {trend:Boolean(trend), labelSize:label&&getComputedStyle(label).fontSize, selectorSize:value&&getComputedStyle(value).fontSize,
+              reviewText:review?.textContent.trim(),reviewLineRects:review?(()=>{const text=[...review.childNodes].find(node=>node.nodeType===Node.TEXT_NODE&&node.textContent.trim());if(!text)return null;const range=document.createRange();range.selectNodeContents(text);return range.getClientRects().length})():null,
+              quoteLabelSize:quoteLabel&&getComputedStyle(quoteLabel).fontSize,quoteValueSize:quoteValue&&getComputedStyle(quoteValue).fontSize,
+              transientFeedBanner:transient,activityScroll:activity?{height:activity.getBoundingClientRect().height,maxHeight:getComputedStyle(activity).maxHeight,overflowY:getComputedStyle(activity).overflowY}:null};
+          })()`);
+          if (!marketChecks.trend || marketChecks.labelSize !== '14px' || marketChecks.selectorSize !== '16px' || marketChecks.quoteLabelSize !== '14px' || marketChecks.quoteValueSize !== '16px' || marketChecks.transientFeedBanner || (marketChecks.reviewLineRects && marketChecks.reviewLineRects > 1) || (marketChecks.activityScroll && (marketChecks.activityScroll.maxHeight !== '320px' || marketChecks.activityScroll.overflowY !== 'auto'))) throw new Error('Market presentation checks failed: '+JSON.stringify(marketChecks));
+          evidence.push({screen:'market-selection-and-trend',width,...marketChecks});
+          if (width === 1440) {
+            const initial = await evaluate(`(() => {const active=document.querySelector('.hero-heading-slide.is-active');const r=active?.getBoundingClientRect();return {text:active?.innerText.trim(),bounds:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null}})()`);
+            await new Promise(resolve => setTimeout(resolve, 8200));
+            const advanced = await evaluate(`(() => {const active=document.querySelector('.hero-heading-slide.is-active');const r=active?.getBoundingClientRect();return {text:active?.innerText.trim(),bounds:r?{x:r.x,y:r.y,width:r.width,height:r.height}:null}})()`);
+            if (!initial.text || advanced.text === initial.text || JSON.stringify(advanced.bounds) !== JSON.stringify(initial.bounds)) throw new Error('Hero headline did not advance while preserving its layout bounds.');
+            await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+            await new Promise(resolve => setTimeout(resolve, 100));
+            const reducedStart = await evaluate(`(() => {const active=document.querySelector('.hero-heading-slide.is-active');return {text:active?.innerText.trim(),animation:getComputedStyle(active).animationName}})()`);
+            await new Promise(resolve => setTimeout(resolve, 8200));
+            const reducedEnd = await evaluate(`(() => {const active=document.querySelector('.hero-heading-slide.is-active');return {text:active?.innerText.trim(),animation:getComputedStyle(active).animationName}})()`);
+            if (reducedStart.text !== reducedEnd.text || reducedStart.animation !== 'none' || reducedEnd.animation !== 'none') throw new Error('Reduced-motion preference did not keep the headline still: '+JSON.stringify({reducedStart,reducedEnd}));
+            evidence.push({screen:'hero-motion',width,initial,advanced,reducedStart,reducedEnd});
+            await call('Emulation.setEmulatedMedia', { features: [] });
+          }
           const quoteAction = await evaluate(`(() => {
-            const button = [...document.querySelectorAll('.quote-button')].find(item => item.textContent.includes('Review bid'));
+            const button = [...document.querySelectorAll('.quote-button')].find(item => item.textContent.includes('Review buy'));
             const helper = document.querySelector('.quote-disabled-reason');
             if (!button) return {buttonFound:false,buttonEnabled:false,helperVisible:Boolean(helper)};
             button.click();
@@ -129,17 +173,26 @@ export async function runVisualReview(port) {
             ['risk', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Margin and positions"))?.click()'],
             ['join', '[...document.querySelectorAll("button")].find(b => /Start challenge|Join challenge/.test(b.textContent) && b.getClientRects().length)?.click()'],
             ['wallet', '[...document.querySelectorAll(".mobile-order-bar button:last-child,.topbar .button--connect")].find(b => b.getClientRects().length)'],
-            ['orders', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Open order details"))?.click()'],
+            ['orders', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Order details"))?.click()'],
           ]) {
             const rect = await evaluate(`(() => {const button=${expression.replace('?.click()', '')}; if(!button) return null;button.scrollIntoView({block:'center',behavior:'instant'});const r=button.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
             if (!rect) throw new Error('Missing '+name+' action');
+            const actionEnabled = await evaluate(`(() => {const button=${expression.replace('?.click()', '')};return !button.disabled;})()`);
+            if (name === 'join' && !actionEnabled) { evidence.push({screen:name,width,skipped:'Join is disabled by current round or wallet prerequisites.'}); continue; }
             await call('Input.dispatchMouseEvent', {type:'mousePressed',...rect,button:'left',clickCount:1});
             await call('Input.dispatchMouseEvent', {type:'mouseReleased',...rect,button:'left',clickCount:1});
             await new Promise(resolve => setTimeout(resolve, 650));
             if (!await evaluate('!!document.querySelector("[role=dialog]")')) throw new Error(name+' dialog did not open');
             await capture(name);
             const usesWalletPicker = name === 'join' || name === 'wallet';
-            const box = await evaluate(`(() => {const d=${usesWalletPicker ? "document.querySelector('[data-rk] [role=document]')" : "document.querySelector('.modal')"};if(!d)return null;const r=d.getBoundingClientRect();return {height:r.height,width:r.width,top:r.top,bottom:r.bottom,viewport:innerHeight,viewportWidth:innerWidth,fontLoaded:document.fonts.check('500 16px "Plus Jakarta Sans"')}})()`);
+            const box = await evaluate(`(() => {const d=${usesWalletPicker ? "document.querySelector('[data-rk] [role=document]')" : "document.querySelector('.modal')"};if(!d)return null;const r=d.getBoundingClientRect(),style=getComputedStyle(d),overlay=document.querySelector('[data-rk] [role=dialog]');const surfaceBackgrounds=[...document.querySelectorAll('[data-rk] *')].map(el=>getComputedStyle(el).backgroundColor).filter(color=>color==='rgb(26, 27, 31)');return {height:r.height,width:r.width,top:r.top,bottom:r.bottom,viewport:innerHeight,viewportWidth:innerWidth,fontLoaded:document.fonts.check('500 16px "Plus Jakarta Sans"'),pickerBackground:style.backgroundColor,surfaceBackgrounds,modalThemeVar:style.getPropertyValue('--rk-colors-modalBackground').trim(),overlayBackground:overlay?getComputedStyle(overlay).backgroundColor:null,overlayOpacity:overlay?getComputedStyle(overlay).opacity:null}})()`);
+            if (usesWalletPicker && box && (!box.surfaceBackgrounds.length || !box.modalThemeVar || !box.overlayBackground || box.overlayOpacity !== '1')) throw new Error('Wallet picker surface or overlay is missing its static theme styling: '+JSON.stringify(box));
+            if (name === 'wallet' && !box) {
+              evidence.push({screen:name,width,skipped:'Wallet picker is unavailable in this unconnected browser.'});
+              await call('Input.dispatchKeyEvent', {type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+              await call('Input.dispatchKeyEvent', {type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+              continue;
+            }
             const minimumHeight = usesWalletPicker ? 160 : 240;
             if(!box || box.height < minimumHeight || box.width > box.viewportWidth+1 || box.top < 0 || box.bottom > box.viewport+1) throw new Error('Collapsed or clipped '+name+' sheet: '+JSON.stringify(box));
             const dialogCopyAudit = await auditVisibleText();

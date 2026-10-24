@@ -162,9 +162,9 @@ export async function readParticipantSnapshot(sessionHash: string) {
     (SELECT latest.reason FROM score_samples latest WHERE latest.participant_id=$1 AND latest.round_id=$2
       ORDER BY latest.sampled_at DESC LIMIT 1) AS side_reason
     FROM score_samples s WHERE s.participant_id=$1 AND s.round_id=$2`, [participant.id, participant.round_id]);
-  const orders = await query(`SELECT qi.client_order_id,qi.side,qi.status AS intent_status,qi.verification_error,
+  const orders = await query(`SELECT qi.client_order_id,qi.side,r.market AS symbol,qi.status AS intent_status,qi.verification_error,
     qi.last_checked_at,qi.first_open_observed_at,oo.exchange_order_id,oo.exchange_status,oo.price::text,
-    oo.original_qty::text,oo.filled_qty::text,oo.observed_at FROM quote_intents qi LEFT JOIN LATERAL
+    oo.original_qty::text,oo.filled_qty::text,oo.observed_at FROM quote_intents qi JOIN rounds r ON r.id=qi.round_id LEFT JOIN LATERAL
     (SELECT * FROM order_observations obs WHERE obs.intent_id=qi.id ORDER BY obs.observed_at DESC LIMIT 1) oo ON true
     WHERE qi.participant_id=$1 AND qi.round_id=$2 ORDER BY qi.created_at`, [participant.id, participant.round_id]);
   return { serverTime: Date.now(), participant: { id: participant.id, roundId: participant.round_id,
@@ -185,4 +185,18 @@ function parseScoreSideReasons(value: string | null): { bid: string; ask: string
       ? { bid: reasons.bid, ask: reasons.ask }
       : null;
   } catch { return null; }
+}
+
+/** Public exchange observations only. No wallet identities, account IDs or signing data. */
+export async function readRecentActivity(symbol: string) {
+  const rows = await query<{ id: string; symbol: string; side: "buy" | "sell"; exchange_status: string;
+    price: string; size: string; filled: string; observed_at: Date }>(`
+    SELECT qi.id,r.market AS symbol,qi.side,oo.exchange_status,oo.price::text,
+      oo.original_qty::text AS size,oo.filled_qty::text AS filled,oo.observed_at
+    FROM quote_intents qi JOIN rounds r ON r.id=qi.round_id
+    JOIN LATERAL (SELECT exchange_status,price,original_qty,filled_qty,observed_at
+      FROM order_observations WHERE intent_id=qi.id ORDER BY observed_at DESC LIMIT 1) oo ON true
+    WHERE r.market=$1 ORDER BY oo.observed_at DESC LIMIT 40`, [symbol]);
+  return { activity: rows.map(row => ({ id: row.id, symbol: row.symbol, side: row.side, status: row.exchange_status,
+    price: row.price, size: row.size, filled: row.filled, observedAt: row.observed_at.getTime() })) };
 }

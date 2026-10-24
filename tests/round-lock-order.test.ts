@@ -23,6 +23,24 @@ test("quote intent creation locks the round before participant rows", async () =
   assert.match(statements[1]!, /FOR UPDATE OF p/);
 });
 
+test("quote intent refuses risk evidence for a different locked round market", async () => {
+  const statements: string[] = [];
+  const client = {
+    async query(sql: string) {
+      statements.push(sql);
+      if (statements.length === 1) return { rowCount: 1, rows: [{ id: "fixture-round" }] };
+      if (statements.length === 2) return { rowCount: 1, rows: [{ participant_id: "fixture-participant", round_id: "fixture-round",
+        market: "BTC-USD", starts_at: new Date(1_000), ends_at: new Date(181_000) }] };
+      throw new Error("Market mismatch should be rejected before reading or writing quote rows.");
+    },
+  } as unknown as PoolClient;
+  await assert.rejects(issueQuoteIntent(client, "fixture-session", "buy", 2_000, {
+    symbol: "ETH-USD", availableBalance: "1000", currentAbsoluteExposure: "0", requestedNotional: "100",
+    maximumAccountExposure: "1000", price: "100", size: "1",
+  }), /round market changed/i);
+  assert.equal(statements.length, 2);
+});
+
 test("order observations lock the round before participant and intent rows", async () => {
   const { client, statements } = sequencedClient([1, 0]);
   const quote: VerifiedQuote = {

@@ -1,10 +1,11 @@
+import { isMarketSymbol } from "../shared/markets.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
-import { readCurrentRound, readRoundReport, readRoundAudit, readLeaderboard, readParticipantSnapshot, query, scoringLeaderConfigured, transaction } from "./database.ts";
+import { readRecentActivity, readCurrentRound, readRoundReport, readRoundAudit, readLeaderboard, readParticipantSnapshot, query, scoringLeaderConfigured, transaction } from "./database.ts";
 import { issueSession, readSessionHash, requestHasTrustedOrigin, requireSession } from "./session.ts";
 import { openEventStream } from "./events.ts";
-import { readMarketSnapshot, readPublicAccount, readPublicPositions, StrikeReadError } from "./strike.ts";
+import { readMarketCatalog, readPriceHistory, readMarketSnapshot, readPublicAccount, readPublicPositions, StrikeReadError } from "./strike.ts";
 import { RoundGuardError, enrollParticipant, issueQuoteIntent } from "./roundService.ts";
 import { readGamePolicy, publicGamePolicy } from "./gamePolicy.ts";
 import { assertFreshRisk, assertWithinExposure, readAccountRisk } from "./accountRisk.ts";
@@ -53,13 +54,17 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountId)) {
           sendJson(response, 400, { error: "Connect your wallet first." }); return;
         }
-        const snapshot = await readMarketSnapshot("BTC-USD");
+        const symbol = body && typeof body === "object" && "symbol" in body ? body.symbol : "BTC-USD";
+        if (!isMarketSymbol(symbol)) throw new RoundGuardError("Choose an available market.", 400);
+        const markets = await readMarketCatalog();
+        if (!markets.some(market => market.symbol === symbol && market.available)) throw new RoundGuardError("This market is unavailable. Choose another market.", 423);
+        const snapshot = await readMarketSnapshot(symbol);
         if (!snapshot.mark || !snapshot.depth || !snapshot.marketRules || snapshot.unavailableSources.length) {
           throw new RoundGuardError("Strike market data is incomplete. Refresh before joining.", 503);
         }
         const policy = readGamePolicy(snapshot.marketRules);
         if (!policy) throw new RoundGuardError("Round limits are not ready yet. You can still explore the live arena.", 423);
-        const risk = await readAccountRisk(accountId);
+        const risk = await readAccountRisk(accountId, symbol);
         const now = Date.now();
         assertFreshRisk(risk, now);
         assertWithinExposure(risk, policy.rules.maximumAccountExposure);
@@ -67,7 +72,7 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
           accountId, observedAt: Math.min(snapshot.checkedAt, snapshot.marketRules!.observedAt, risk.observedAt),
           availableCollateral: risk.account.available_balance, requiredCollateral: policy.requiredCollateral,
           absoluteExposure: risk.absoluteExposure,
-          effectiveLeverage: risk.account.symbolSettings?.["BTC-USD"]?.leverage ?? 0,
+          effectiveLeverage: risk.account.symbolSettings?.[symbol]?.leverage ?? 0,
           provenance: "strike-independent-read",
         }, policy.rules, now));
         try { scoringHooks?.onRoundJoined?.(result.roundId); } catch { /* The current-round poll can retry dispatch. */ }
@@ -80,11 +85,13 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
       if ((side !== "buy" && side !== "sell") || typeof price !== "string" || typeof size !== "string") {
         sendJson(response, 400, { error: "Choose a side and enter a price and size." }); return;
       }
-      const participant = await query<{ claimed_account_id: string }>(`SELECT p.claimed_account_id FROM participants p
+      const participant = await query<{ claimed_account_id: string; market: string }>(`SELECT p.claimed_account_id,r.market FROM participants p
         JOIN rounds r ON r.id=p.round_id WHERE p.session_hash=$1 AND r.status='active'`, [sessionHash]);
       const accountId = participant[0]?.claimed_account_id;
       if (!accountId) throw new RoundGuardError("Join an available round before reviewing a quote.");
-      const snapshot = await readMarketSnapshot("BTC-USD");
+      const symbol = participant[0]!.market;
+      if (!body || typeof body !== "object" || !("symbol" in body) || body.symbol !== symbol) throw new RoundGuardError("The round market changed. Review your quote again.");
+      const snapshot = await readMarketSnapshot(symbol);
       if (!snapshot.mark || !snapshot.depth || !snapshot.marketRules || snapshot.unavailableSources.length) {
         throw new RoundGuardError("Strike market data is incomplete. Refresh before reviewing a quote.", 503);
       }
@@ -97,7 +104,7 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
         const error = validation.errors.price ?? validation.errors.size ?? validation.errors.general ?? "Review the quote details.";
         sendJson(response, 422, { error, errors: validation.errors }); return;
       }
-      const risk = await readAccountRisk(accountId);
+      const risk = await readAccountRisk(accountId, symbol);
       const now = Date.now();
       assertFreshRisk(risk, now);
       const notional = parseDecimal(validation.notional);
@@ -107,7 +114,7 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
       }
       if (compareDecimals(available, notional) < 0) throw new RoundGuardError("Available Strike collateral is below this quote’s notional.", 423);
       const intent = await transaction(client => issueQuoteIntent(client, sessionHash, side, now, {
-        availableBalance: risk.account.available_balance, currentAbsoluteExposure: risk.absoluteExposure,
+        symbol, availableBalance: risk.account.available_balance, currentAbsoluteExposure: risk.absoluteExposure,
         requestedNotional: validation.notional!, maximumAccountExposure: policy.rules.maximumAccountExposure,
         price, size,
       }));
@@ -135,8 +142,21 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
       return;
     }
     if (url.pathname === "/api/game-policy") {
-      const snapshot = await readMarketSnapshot("BTC-USD");
-      sendJson(response, 200, publicGamePolicy(snapshot.marketRules)); return;
+      const symbol = queryValue(url, "symbol") ?? "BTC-USD";
+      const snapshot = await readMarketSnapshot(symbol);
+      const validPrice = snapshot.mark && snapshot.marketRules && Number(snapshot.mark.markPrice) >= Number(snapshot.marketRules.minimumPrice)
+        && Number(snapshot.mark.markPrice) <= Number(snapshot.marketRules.maximumPrice);
+      sendJson(response, 200, publicGamePolicy(validPrice ? snapshot.marketRules : null)); return;
+    }
+    if (url.pathname === "/api/markets") { sendJson(response, 200, { markets: await readMarketCatalog() }); return; }
+    if (url.pathname === "/api/price-history") {
+      const symbol = queryValue(url, "symbol") ?? "BTC-USD";
+      sendJson(response, 200, { symbol, points: await readPriceHistory(symbol) }); return;
+    }
+    if (url.pathname === "/api/activity") {
+      const symbol = queryValue(url, "symbol") ?? "BTC-USD";
+      if (!isMarketSymbol(symbol)) throw new RoundGuardError("Choose an available market.", 400);
+      sendJson(response, 200, await readRecentActivity(symbol)); return;
     }
     if (url.pathname === "/api/events") { openEventStream(request, response); return; }
     if (url.pathname === "/api/participants/me") {

@@ -1,3 +1,4 @@
+import { isMarketSymbol, marketSymbols, type MarketOption, type PricePoint } from "../shared/markets.ts";
 import type { MarketSnapshot, StrikeDepth, StrikeDepthLevel, StrikeMark, StrikePublicAccount, StrikeMarketRules, StrikePosition, VerifiedQuote } from "../shared/contracts.ts";
 
 export const STRIKE_TESTNET_ORIGIN = "https://api-v2-testnet.strikefinance.org";
@@ -106,7 +107,7 @@ async function readSource(url: URL): Promise<{ data: unknown; observedAt: number
 }
 
 export async function readMarketSnapshot(symbol: string): Promise<MarketSnapshot> {
-  if (!/^BTC-USD$/.test(symbol)) throw new StrikeReadError("Toruni currently supports BTC-USD only.", 400);
+  if (!isMarketSymbol(symbol)) throw new StrikeReadError("Choose an available market.", 400);
   const markUrl = new URL("/price/v2/markPrice", STRIKE_TESTNET_ORIGIN);
   markUrl.searchParams.set("symbol", symbol);
   const depthUrl = new URL("/price/v2/depth", STRIKE_TESTNET_ORIGIN);
@@ -334,4 +335,32 @@ export function parsePublicOrder(raw: unknown, intent: RegisteredOrderIntent, ve
       provenance: "strike-public-order-read",
     },
   };
+}
+
+/** The engine catalogue, including its price limits, controls market availability. */
+export async function readMarketCatalog(): Promise<MarketOption[]> {
+  const raw = await getJson(new URL("/v2/markets", STRIKE_TESTNET_ORIGIN));
+  const rows = asRecord(asRecord(raw)?.markets);
+  return marketSymbols.flatMap(symbol => {
+    const row = rows ? asRecord(rows[symbol]) : null;
+    if (!row) return [];
+    const rules = parseMarketRules(symbol, raw, Date.now());
+    const mark = typeof row.mark_price === "string" ? Number(row.mark_price) : NaN;
+    const available = Boolean(rules && rules.status === "trading" && !rules.reduceOnly && Number.isFinite(mark)
+      && mark >= Number(rules.minimumPrice) && mark <= Number(rules.maximumPrice));
+    return [{ symbol, name: typeof row.name === "string" ? row.name : symbol, available }];
+  });
+}
+
+export async function readPriceHistory(symbol: string): Promise<PricePoint[]> {
+  if (!isMarketSymbol(symbol)) throw new StrikeReadError("Choose an available market.", 400);
+  const url = new URL("/price/v2/klines", STRIKE_TESTNET_ORIGIN);
+  url.searchParams.set("symbol", symbol); url.searchParams.set("interval", "1m"); url.searchParams.set("limit", "60");
+  const raw = await getJson(url);
+  if (!Array.isArray(raw)) throw new StrikeReadError("Price history is unavailable.", 503);
+  return raw.flatMap(row => {
+    if (!Array.isArray(row)) return [];
+    const time = Number(row[0]); const close = Number(row[4]);
+    return Number.isSafeInteger(time) && time > 0 && Number.isFinite(close) && close > 0 ? [{ time, close }] : [];
+  }).sort((a, b) => a.time - b.time).filter((point, index, all) => !index || point.time > all[index - 1]!.time).slice(-60);
 }

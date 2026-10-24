@@ -7,7 +7,7 @@ export interface ParticipantSnapshot {
   sideReasons: { bid: string; ask: string } | null; asOf: number | null;
 }
 export interface ObservedOrder {
-  client_order_id: string; side: "buy" | "sell"; intent_status: string; verification_error: string | null;
+  symbol?: string; client_order_id: string; side: "buy" | "sell"; intent_status: string; verification_error: string | null;
   last_checked_at: string | null; first_open_observed_at: string | null;
   exchange_order_id: string | null; exchange_status: string | null;
   price: string | null; original_qty: string | null; filled_qty: string | null; observed_at: string | null;

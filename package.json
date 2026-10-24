@@ -13,6 +13,7 @@
     "migrate": "node --env-file-if-exists=.env.local --experimental-strip-types server/migrate.ts"
   },
   "dependencies": {
+    "@phosphor-icons/react": "2.1.10",
     "@rainbow-me/rainbowkit": "2.2.11",
     "@tanstack/react-query": "5.104.5",
     "@vercel/functions": "3.6.1",

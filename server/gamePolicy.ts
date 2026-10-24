@@ -21,7 +21,7 @@ export function readGamePolicy(market: StrikeMarketRules | null): {
   if (compareDecimals(exposureCap, twoSidedReserve) < 0) return null;
   return {
     rules: {
-      symbol: "BTC-USD",
+      symbol: market.symbol,
       minimumRemainingNotional: market.minimumNotional,
       maximumQuoteNotional,
       maximumAccountExposure,

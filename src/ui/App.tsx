@@ -14,7 +14,11 @@ import { connectStrikeUserStream } from "../api/userStream";
 import { formatUsd } from "./format";
 import { userFacingError } from "./errors";
 import { verifiedTerminalOrder } from "./requote";
-import { marketStatusMessage } from "./marketStatus";
+import { ArrowRightIcon, ArrowLeftIcon, ArrowDownLeftIcon, ArrowUpRightIcon, CheckIcon, BookOpenIcon, WalletIcon, ClockIcon, ShieldCheckIcon, WarningCircleIcon, XIcon, ArrowsLeftRightIcon } from "@phosphor-icons/react";
+import { baseAsset, isMarketSymbol, type MarketOption } from "../../shared/markets";
+import { MarketTrend } from "./MarketTrend";
+import { MarketActivity } from "./MarketActivity";
+import { HeroHeading } from "./HeroHeading";
 import { readConnectedWalletAddress } from "../api/walletProvider";
 import { useWalletConnection, type WalletConnectorBridge } from "../wallet/WalletConnectionProvider";
 
@@ -50,31 +54,17 @@ function formatPositionSize(value: string, symbol: string): string {
 }
 
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
-  const shared = {
-    width: size,
-    height: size,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 1.8,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    "aria-hidden": true as const,
-  };
-  if (name === "arrow") return <svg {...shared}><path d="M5 12h14M13 5l7 7-7 7" /></svg>;
-  if (name === "check") return <svg {...shared}><path d="m5 12 4 4L19 6" /></svg>;
-  if (name === "book") return <svg {...shared}><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 0 4 22z" /><path d="M4 5.5v14A2.5 2.5 0 0 1 6.5 17H20" /></svg>;
-  if (name === "wallet") return <svg {...shared}><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M3 9h18M16 14h.01" /></svg>;
-  if (name === "clock") return <svg {...shared}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>;
-  if (name === "shield") return <svg {...shared}><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z" /><path d="m9 12 2 2 4-4" /></svg>;
-  return <svg {...shared}><circle cx="12" cy="12" r="9" /><path d="M12 8v4m0 4h.01" /></svg>;
+  const Glyph = ({ arrow: ArrowRightIcon, check: CheckIcon, book: BookOpenIcon, wallet: WalletIcon,
+    clock: ClockIcon, shield: ShieldCheckIcon, close: XIcon } as Record<string, typeof ArrowRightIcon>)[name] ?? WarningCircleIcon;
+  return <Glyph size={size} weight="regular" aria-hidden="true" />;
 }
 
 function StatusPill({ state, children }: { state: "live" | "waiting" | "paused"; children: ReactNode }) {
   return <span className={`status-pill status-pill--${state}`}><span className="status-dot" />{children}</span>;
 }
 
-function AppDialog({ kind, onClose, address, account, stage, error, onChooseWallet, onAuthorize, onReconcile, recovering, risk, riskLoading, riskError, onRiskRefresh, orders, ordersCurrent, canJoinRound, joinBlockReason, joining, joinError, onJoin, quoteReview, quoteSubmitting, canWriteOrders, canCancelOrders, onSubmitQuote, onCancelOrder, cancelingOrderIds, requoteOrder, requoteStage, requoteError, onConfirmRequote, onCheckRequote, onOpenRisk }: {
+function AppDialog({ symbol, kind, onClose, address, account, stage, error, onChooseWallet, onAuthorize, onReconcile, recovering, risk, riskLoading, riskError, onRiskRefresh, orders, ordersCurrent, canJoinRound, joinBlockReason, joining, joinError, onJoin, quoteReview, quoteSubmitting, canWriteOrders, canCancelOrders, onSubmitQuote, onCancelOrder, cancelingOrderIds, requoteOrder, requoteStage, requoteError, onConfirmRequote, onCheckRequote, onOpenRisk }: {
+  symbol: string;
   orders: ObservedOrder[];
   ordersCurrent: boolean;
   canJoinRound: boolean;
@@ -82,7 +72,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onChooseWall
   joining: boolean;
   joinError: string;
   onJoin: () => void;
-  quoteReview: { side: "buy" | "sell"; price: string; size: string; notional: string } | null;
+  quoteReview: { symbol: string; side: "buy" | "sell"; price: string; size: string; notional: string } | null;
   quoteSubmitting: boolean;
   canWriteOrders: boolean;
   canCancelOrders: boolean;
@@ -131,7 +121,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onChooseWall
   }, [kind]);
 
   const isConnect = kind === "connect";
-  const title = kind === "rules" ? "How scoring works" : kind === "how" ? "Make both sides count" : kind === "risk" ? "Margin and positions" : kind === "orders" ? "Your offers" : kind === "quote-review" ? `Review ${quoteReview?.side === "buy" ? "bid" : "ask"}` : kind === "requote" ? `Requote ${requoteOrder?.side === "buy" ? "bid" : "ask"}` : stage === "checking-account" ? "Checking account" : stage === "account-found" || stage === "new-account" ? "Authorize Toruni" : stage === "connected" ? "Your Strike account" : stage === "unknown" ? "Check approval" : "Connect wallet";
+  const title = kind === "rules" ? "How scoring works" : kind === "how" ? "How to play" : kind === "risk" ? "Margin and positions" : kind === "orders" ? "Your offers" : kind === "quote-review" ? `Review ${quoteReview?.side === "buy" ? "buy" : "sell"}` : kind === "requote" ? `Requote ${requoteOrder?.side === "buy" ? "buy" : "sell"}` : stage === "checking-account" ? "Checking account" : stage === "account-found" || stage === "new-account" ? "Authorize Toruni" : stage === "connected" ? "Your Strike account" : stage === "unknown" ? "Check approval" : "Connect wallet";
   if (!kind) return null;
   return createPortal(
     <div className={`dialog-overlay ${isConnect || kind === "risk" ? "dialog-overlay--side" : ""}`} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
@@ -145,24 +135,25 @@ function AppDialog({ kind, onClose, address, account, stage, error, onChooseWall
       if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     }}>
-      <div className="modal-heading"><h2 id="dialog-title">{title}</h2><button className="icon-button" onClick={onClose} aria-label="Close dialog" disabled={requoteStage === "canceling" || requoteStage === "checking"}>×</button></div>
+      <div className="modal-heading"><h2 id="dialog-title">{title}</h2><button className="icon-button" onClick={onClose} aria-label="Close dialog" disabled={requoteStage === "canceling" || requoteStage === "checking"}><Icon name="close" size={20} /></button></div>
       {kind === "rules" && <div className="modal-copy">
         <p>Earn points by keeping buy and sell offers close to the market price.</p>
         <ul><li>Closer offers earn more. Offers 0.5% or more from the market earn no points.</li><li>Keep an offer open for five seconds before it starts scoring.</li><li>Keep both a buy and a sell offer open to earn a two-sided bonus.</li><li>Scoring pauses when current market or account information is unavailable.</li></ul>
         <p className="risk-warning">An offer can fill and create a position. Canceling the offer does not close that position.</p>
       </div>}
       {kind === "how" && <div className="how-content">
-        <div className="how-rails" aria-label="Buy below the market price; sell above it"><span>BUY</span><i /><b>MARKET</b><i /><span>SELL</span></div>
-        <p>Offer to buy below the market price and sell above it. Keep both offers open during the three-minute round to earn points.</p>
-        <div className="how-steps"><span><b>01</b> Connect and check account</span><span><b>02</b> Review each quote</span><span><b>03</b> Keep both sides eligible</span></div>
-
+        <div className="how-market" aria-label="Buy below the market and sell above it"><span>Buy</span><ArrowRightIcon className="how-arrow" size={22}/><strong>Market</strong><ArrowLeftIcon className="how-arrow how-arrow--sell" size={22}/><span>Sell</span></div>
+        <ol className="how-timeline">
+          <li><WalletIcon size={22}/><div><h3>Connect your wallet</h3><p>Choose a market and join the round.</p></div></li>
+          <li><ArrowsLeftRightIcon size={22}/><div><h3>Place both offers</h3><p>Buy below the market. Sell above it.</p></div></li>
+          <li><ClockIcon size={22}/><div><h3>Keep them competitive</h3><p>Earn points over 180 seconds.</p></div></li>
+        </ol>
       </div>}
       {kind === "orders" && <OrderRecords orders={orders} current={ordersCurrent} onCancel={onCancelOrder} canCancel={canCancelOrders} cancelingOrderIds={cancelingOrderIds} />}
       {kind === "quote-review" && quoteReview && <div className="connect-flow quote-review">
-        <p>Review this offer before sending it to Strike.</p>
-        <div className="balance-row"><span>Side</span><strong>{quoteReview.side === "buy" ? "Buy · bid" : "Sell · ask"}</strong></div>
+        <div className="balance-row"><span>Side</span><strong>{quoteReview.side === "buy" ? "Buy" : "Sell"}</strong></div>
         <div className="balance-row"><span>Price</span><strong>${formatPrice(quoteReview.price)}</strong></div>
-        <div className="balance-row"><span>Size</span><strong>{quoteReview.size} BTC</strong></div>
+        <div className="balance-row"><span>Size</span><strong>{quoteReview.size} {baseAsset(symbol)}</strong></div>
         <div className="balance-row"><span>Order value</span><strong>{formatUsd(quoteReview.notional)}</strong></div>
         <div className="quote-order-terms"><span>Order type</span><strong>Post-only limit</strong><span>Stays open</span><strong>Until you cancel it, even after the round ends</strong></div>
         <p className="risk-warning">A fill opens a position. Canceling the offer does not close it.</p>
@@ -172,7 +163,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onChooseWall
       </div>}
       {kind === "requote" && requoteOrder && <div className="connect-flow requote-flow">
         {requoteStage === "confirm" && <>
-          <p>Toruni will cancel this offer and wait for Strike to confirm it is closed. Then you can change the price or amount.</p>
+          <p>Your offer must be canceled before you can edit it.</p>
           <p className="risk-warning">It may fill before cancellation completes. A fill creates a position, and canceling does not close it.</p>
           <button className="button button--primary button--wide" onClick={onConfirmRequote}>Cancel offer and edit</button>
           <button className="button button--ghost button--wide" onClick={onClose}>Keep offer</button>
@@ -197,7 +188,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onChooseWall
         {!account && <p>Connect to view your balance and positions.</p>}
         {risk && <><div className="balance-row"><span>Available balance</span><strong>{formatUsd(risk.account.available_balance)}</strong></div>
           <h3>Open positions</h3>{risk.positions.length === 0 ? <p>No open positions.</p> : <ul className="position-list">{risk.positions.map((position, index) => <li key={`${position.symbol}-${index}`}><strong>{position.symbol}</strong><span>{formatPositionSize(position.size, position.symbol)}</span><span>{position.leverage}x · {position.marginMode}</span></li>)}</ul>}
-          <p className="modal-note">Leverage: {risk.account.symbolSettings?.["BTC-USD"]?.leverage !== undefined ? `${risk.account.symbolSettings["BTC-USD"].leverage}x` : "Unavailable"}. Toruni requires 1x to play.</p></>}
+          <p className="modal-note">Leverage: {risk.account.symbolSettings?.[symbol]?.leverage !== undefined ? `${risk.account.symbolSettings[symbol].leverage}x` : "Unavailable"}. Toruni requires 1x to play.</p></>}
         {account && <button className="button button--ghost button--wide" onClick={onRiskRefresh} disabled={riskLoading}>Refresh account and positions</button>}
         <p className="risk-warning">Canceling an offer will not close a position created by a fill.</p>
       </div>}
@@ -238,7 +229,7 @@ function AppDialog({ kind, onClose, address, account, stage, error, onChooseWall
           {stage === "new-account" && <>
             <div className="authorization-notice"><Icon name="shield" size={18} /><span>Approval does not place an offer or deposit funds.</span></div>
             <button className="button button--primary button--wide" onClick={onAuthorize}>
-              Continue to wallet signature <Icon name="arrow" />
+              Authorize Toruni <Icon name="arrow" />
             </button>
           </>}
           {stage === "checking-account" && <div className="progress-line"><span className="spinner" />Checking account…</div>}
@@ -281,9 +272,14 @@ export function App() {
   useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [tab, setTab] = useState<Tab>("quotes");
+  const [selectedMarket, setSelectedMarket] = useState(() => {
+    try { const stored = localStorage.getItem("toruni-market"); return isMarketSymbol(stored) ? stored : "BTC-USD"; } catch { return "BTC-USD"; }
+  });
+  const symbol = roundData.round?.symbol ?? selectedMarket;
+  const symbolRef = useRef(symbol); symbolRef.current = symbol;
+  const [markets, setMarkets] = useState<MarketOption[]>([]);
   const [market, setMarket] = useState<MarketSnapshot | null>(null);
   const [marketState, setMarketState] = useState<MarketState>("checking");
-  const [marketMessage, setMarketMessage] = useState("Checking market data");
   const [connectStage, setConnectStage] = useState<ConnectStage>("idle");
   const [walletAddress, setWalletAddress] = useState("");
   const [account, setAccount] = useState<PublicStrikeAccount | null>(null);
@@ -304,7 +300,7 @@ export function App() {
   const [joinError, setJoinError] = useState("");
   const [joining, setJoining] = useState(false);
   const [quoteDrafts, setQuoteDrafts] = useState({ buy: { price: "", size: "" }, sell: { price: "", size: "" } });
-  const [quoteReview, setQuoteReview] = useState<{ side: "buy" | "sell"; price: string; size: string; notional: string } | null>(null);
+  const [quoteReview, setQuoteReview] = useState<{ symbol: string; side: "buy" | "sell"; price: string; size: string; notional: string } | null>(null);
   const [quoteSubmitting, setQuoteSubmitting] = useState(false);
   const [requoteOrder, setRequoteOrder] = useState<ObservedOrder | null>(null);
   const [requoteStage, setRequoteStage] = useState<RequoteStage>(null);
@@ -331,32 +327,50 @@ export function App() {
     let cancelled = false;
     let timer = 0;
     const poll = async () => {
-      try { const policy = await readGamePolicy(); if (!cancelled) setGamePolicy(policy); }
+      try { const policy = await readGamePolicy(symbol); if (!cancelled) setGamePolicy(policy); }
       catch { if (!cancelled) setGamePolicy(null); }
       if (!cancelled) timer = window.setTimeout(poll, 15_000);
     };
     void poll();
     return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [symbol]);
+  useEffect(() => {
+    let cancelled = false; let timer = 0;
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        const response = await fetch("/api/markets", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5_000)]) });
+        if (!response.ok) throw new Error("Market catalogue unavailable");
+        const data = await response.json() as { markets: MarketOption[] };
+        if (!cancelled && Array.isArray(data.markets)) setMarkets(data.markets.filter(option => isMarketSymbol(option.symbol) && typeof option.available === "boolean"));
+      } catch { /* Keep the last catalogue during a brief connection interruption. */ }
+      if (!cancelled) timer = window.setTimeout(load, 30_000);
+    };
+    void load();
+    return () => { cancelled = true; controller.abort(); window.clearTimeout(timer); };
   }, []);
+  useEffect(() => {
+    setMarket(null); setMarketState("checking"); setGamePolicy(null); setQuoteReview(null); setNotice("");
+    setDialog(current => current === "quote-review" || current === "requote" ? null : current);
+    setQuoteDrafts({ buy: { price: "", size: "" }, sell: { price: "", size: "" } });
+    try { localStorage.setItem("toruni-market", symbol); } catch { /* Selection still works without storage. */ }
+  }, [symbol]);
   const refreshMarket = useCallback(async () => {
     try {
-      const snapshot = await readMarketSnapshot("BTC-USD");
-      setMarket(snapshot);
+      const snapshot = await readMarketSnapshot(symbol);
+      if (symbolRef.current !== symbol) return;
+      setMarket(previous => ({ ...snapshot, mark: snapshot.mark ?? (previous?.symbol === symbol ? previous.mark : null) }));
       if (snapshot.unavailableSources.length === 0) {
         setMarketState("live");
-        setMarketMessage("Market data live");
       } else if (snapshot.unavailableSources.length < 3) {
         setMarketState("partial");
-        setMarketMessage("Some market data is unavailable. Offers are paused.");
       } else {
         setMarketState("offline");
-        setMarketMessage("Market data unavailable. Offers are paused.");
       }
     } catch {
-      setMarketState("offline");
-      setMarketMessage("Market data unavailable. Offers are paused.");
+      if (symbolRef.current === symbol) setMarketState("offline");
     }
-  }, []);
+  }, [symbol]);
 
   useEffect(() => {
     let timer = 0;
@@ -540,13 +554,8 @@ export function App() {
   const showMobileDock = pathname === "/arena" && !resultsRoundId;
 
   const currentMarketState = marketState === "live" && market?.mark && clock - market.mark.observedAt > 5000 ? "offline" : marketState;
-  const currentMarketMessage = marketStatusMessage(marketState, currentMarketState, marketMessage);
   const serverNow = roundData.serverTime ? roundData.serverTime + Math.max(0, clock - roundData.receivedAt) : clock;
   const round = roundData.round;
-  const markAgeSeconds = market?.mark ? Math.max(0, Math.floor((clock - market.mark.observedAt) / 1000)) : null;
-  const markFreshness = markAgeSeconds === null ? null : markAgeSeconds <= 5
-    ? markAgeSeconds === 0 ? "Updated just now" : `Updated ${markAgeSeconds}s ago`
-    : `Delayed · ${markAgeSeconds}s old`;
   const remaining = round ? Math.max(0, Math.ceil(((round.status === "lobby" ? round.startsAt : round.endsAt) - serverNow) / 1000)) : null;
   const countdown = remaining === null ? null : `${Math.floor(remaining / 60).toString().padStart(2, "0")}:${(remaining % 60).toString().padStart(2, "0")}`;
   const markPrice = market?.mark?.markPrice ?? null;
@@ -574,7 +583,7 @@ export function App() {
   const riskFresh = Boolean(risk && clock >= risk.observedAt && clock - risk.observedAt <= 3_000);
   const policyReady = gamePolicy?.ready === true;
   const canJoinRound = Boolean(sessionReady && liveAccount && currentMarketState === "live" && risk && riskFresh && policyReady
-    && risk.account.symbolSettings?.["BTC-USD"]?.leverage === 1
+    && risk.account.symbolSettings?.[symbol]?.leverage === 1
     && Number(risk.account.available_balance) >= Number(gamePolicy?.requiredCollateral ?? Infinity)
     && !participantJoined && (!round || round.status === "lobby"));
   const joinBlockReason = !sessionReady
@@ -585,8 +594,8 @@ export function App() {
         ? "The challenge limits are still being prepared. You can explore the market meanwhile."
         : !riskFresh
           ? "Refresh your Strike balance and positions before joining."
-          : risk?.account.symbolSettings?.["BTC-USD"]?.leverage !== 1
-            ? "Set BTC-USD to 1x leverage in Strike before joining."
+          : risk?.account.symbolSettings?.[symbol]?.leverage !== 1
+            ? `Set ${symbol} to 1x leverage in Strike before joining.`
             : Number(risk?.account.available_balance ?? 0) < Number(gamePolicy?.requiredCollateral ?? Infinity)
               ? `Keep at least ${gamePolicy?.requiredCollateral ?? "the required amount"} available for both offers. Open positions may require more.`
               : participantJoined
@@ -600,7 +609,7 @@ export function App() {
   const sideBusy = (side: "buy" | "sell") => roundData.orders.some(order => order.side === side && order.intent_status !== "terminal");
   const canReviewQuote = (side: "buy" | "sell") => Boolean(sessionReady && liveAccount && market && market.mark && market.depth
     && market.marketRules && currentMarketState === "live" && policyReady && participantJoined
-    && round?.status === "active" && roundData.health === "current" && risk && risk.account.symbolSettings?.["BTC-USD"]?.leverage === 1
+    && round?.status === "active" && roundData.health === "current" && risk && risk.account.symbolSettings?.[symbol]?.leverage === 1
     && !sideBusy(side));
   const quoteBlockReason = !sessionReady
     ? sessionError ? "Connection unavailable. Refresh the page." : "Preparing your connection…"
@@ -616,7 +625,7 @@ export function App() {
             ? "Quote review opens when the round begins."
             : roundData.health !== "current"
               ? "Waiting for current round and order status."
-              : !risk || risk.account.symbolSettings?.["BTC-USD"]?.leverage !== 1
+              : !risk || risk.account.symbolSettings?.[symbol]?.leverage !== 1
                 ? "Refresh your Strike balance and positions first."
                 : "This side already has an unresolved offer.";
 
@@ -626,7 +635,7 @@ export function App() {
     try {
       const refreshed = await refreshRisk(apiSession.accountId);
       if (!refreshed) throw new Error("Strike balance and position data could not be refreshed.");
-      const joined = await joinCurrentRound(apiSession.accountId);
+      const joined = await joinCurrentRound(apiSession.accountId, symbol);
       setDialog(null); navigate("/arena"); setTab("quotes");
       setNotice(`You joined the challenge. It begins in ${Math.max(0, Math.ceil((joined.startsAt - Date.now()) / 1000))} seconds.`);
     } catch (error) { setJoinError(userFacingError(error, "Toruni could not join this challenge. Check your connection and try again.")); }
@@ -640,7 +649,7 @@ export function App() {
       setNotice(quoteBlockReason); return;
     }
     const refreshed = await refreshRisk(apiSession?.accountId);
-    if (!refreshed || refreshed.account.symbolSettings?.["BTC-USD"]?.leverage !== 1) {
+    if (!refreshed || refreshed.account.symbolSettings?.[symbol]?.leverage !== 1) {
       setNotice("Refresh your Strike balance and positions before reviewing a quote."); return;
     }
     const draft = quoteDrafts[side];
@@ -649,7 +658,7 @@ export function App() {
     if (!validation.valid || !validation.notional) {
       setNotice(validation.errors.price ?? validation.errors.size ?? validation.errors.general ?? "Check the quote details."); return;
     }
-    setQuoteReview({ side, ...draft, notional: validation.notional });
+    setQuoteReview({ symbol, side, ...draft, notional: validation.notional });
     setDialog("quote-review");
   };
 
@@ -659,6 +668,7 @@ export function App() {
     let intentIssued = false;
     try {
       const response = await requestQuoteIntent(quoteReview);
+      if (response.intent.symbol !== quoteReview.symbol || response.intent.side !== quoteReview.side || symbolRef.current !== quoteReview.symbol) throw new Error("The market changed. Review your quote again.");
       intentIssued = true;
       await placePostOnlyLimitOrder({ intent: response.intent, price: quoteReview.price, size: quoteReview.size });
       setDialog(null); setQuoteReview(null);
@@ -677,7 +687,7 @@ export function App() {
     setCancelingOrderIds(previous => new Set(previous).add(order.client_order_id));
     setOrderActionMessage("");
     try {
-      await cancelToruniOrder({ clientOrderId: order.client_order_id, exchangeOrderId: order.exchange_order_id, symbol: "BTC-USD" });
+      await cancelToruniOrder({ clientOrderId: order.client_order_id, exchangeOrderId: order.exchange_order_id, symbol: order.symbol ?? "BTC-USD" });
       setOrderActionMessage("Cancel request sent. Checking status.");
     } catch {
       setOrderActionMessage("Cancel was not confirmed. Check the order status before trying again.");
@@ -740,7 +750,7 @@ export function App() {
     setRequoteStage("canceling");
     setRequoteError("");
     try {
-      await cancelToruniOrder({ clientOrderId: order.client_order_id, exchangeOrderId: order.exchange_order_id!, symbol: "BTC-USD" });
+      await cancelToruniOrder({ clientOrderId: order.client_order_id, exchangeOrderId: order.exchange_order_id!, symbol: order.symbol ?? "BTC-USD" });
     } catch {
       // A lost response does not prove the order stayed open. Read its exact status before offering a replacement.
     }
@@ -760,11 +770,8 @@ export function App() {
         </a>
         <span className="network-badge" aria-label="Strike V2 testnet">TESTNET</span>
         <div className="topbar-divider" />
-        <span className="topbar-context">LIQUIDITY ARENA <span className="topbar-dot">·</span> BTC-USD</span>
+        <span className="topbar-context">LIQUIDITY ARENA <span className="topbar-dot">·</span> {symbol}</span>
         <div className="topbar-spacer" />
-        <StatusPill state={currentMarketState === "live" ? "live" : currentMarketState === "checking" ? "waiting" : "paused"}>
-          {currentMarketState === "live" ? "LIVE DATA" : currentMarketState === "checking" ? "CONNECTING" : "PAUSED"}
-        </StatusPill>
         <button className="button button--connect" onClick={openConnect} disabled={pickerLoading} aria-label={pickerLoading ? "Opening wallet options" : liveAccount ? `Connected wallet ${shortAddress(walletAddress)}` : "Connect wallet"}>
           <Icon name="wallet" size={17} />
           <span className="connect-label-full">{pickerLoading ? "Opening wallets…" : liveAccount ? shortAddress(walletAddress) : "Connect wallet"}</span>
@@ -777,22 +784,21 @@ export function App() {
           myOrders={roundData.participant?.roundId === resultsRoundId ? roundData.orders : []}
           canCancel={liveAccount} cancelingOrderIds={cancelingOrderIds}
           onCancel={clientOrderId => { const order = roundData.orders.find(item => item.client_order_id === clientOrderId); if (order) void cancelObservedOrder(order); }} /> : <>
-        {pathname === "/arena" ? <section className="arena-heading"><div><span className="panel-kicker">BTC-USD</span><h1>The liquidity arena</h1></div><button className="button button--ghost" onClick={() => navigate("/")}>Back to lobby</button></section> : <section className="intro-row">
+        {pathname === "/arena" ? <section className="arena-heading"><div><span className="panel-kicker">180-SECOND CHALLENGE</span><h1>Arena</h1></div><button className="button button--ghost" onClick={() => navigate("/")}>Back to lobby</button></section> : <section className="intro-row">
           <div>
-            <div className="eyebrow"><span className="eyebrow-line" />THE MARKET NEEDS MAKERS</div>
-            <h1>Anyone can bet on the market.<br /><em>Can you make the market?</em></h1>
+            <div className="eyebrow"><span className="eyebrow-line" />180-SECOND CHALLENGE</div>
+            <HeroHeading />
           </div>
           <div className="intro-actions">
-            <button className="button button--primary intro-action-primary" onClick={explore}>Explore live arena <Icon name="arrow" size={16} /></button>
+            <button className="button button--primary intro-action-primary" onClick={explore}>Explore arena <Icon name="arrow" size={16} /></button>
             <button className="intro-action-secondary" onClick={() => setDialog("how")}>How it works</button>
             <button className="intro-action-secondary" onClick={() => setDialog("rules")}>Scoring rules</button>
           </div>
         </section>}
 
-        {currentMarketState !== "live" && currentMarketState !== "checking" && <div className={`feed-banner feed-banner--${currentMarketState}`} role="status" aria-live="polite">
-          <span className="feed-banner-icon"><Icon name="alert" size={16} /></span>
-          <span>{currentMarketMessage}</span>
-        </div>}
+        <div className="market-toolbar"><label htmlFor="arena-market">Market</label><select id="arena-market" value={symbol} disabled={!markets.length || Boolean(roundData.round) || quoteSubmitting} onChange={event => { if (isMarketSymbol(event.target.value)) setSelectedMarket(event.target.value); }}>
+          {(markets.length ? markets : [{ symbol, name: symbol, available: true }]).map(option => <option key={option.symbol} value={option.symbol} disabled={!option.available}>{option.symbol}{option.available ? "" : " · Unavailable"}</option>)}
+        </select>{roundData.round && <span className="round-market-lock"><Icon name="clock" size={16}/>Round market</span>}</div>
 
         <div className="mobile-score-strip"><span>{roundData.health === "unavailable" ? "Updates unavailable" : round ? round.status.replaceAll("_", " ") : "Spectating"}</span><strong>Your score {roundData.participant?.score ?? "—"}</strong></div>
         <nav className="mobile-tabs" aria-label="Arena sections">
@@ -802,14 +808,13 @@ export function App() {
         <div className="arena-grid">
           <aside id="market-panel" className={`panel market-panel ${tab !== "market" ? "mobile-hidden" : ""}`}>
             <div className="panel-heading">
-              <div><span className="panel-kicker">LIVE MARKET</span><h2>BTC-USD</h2></div>
-              <span className="market-icon">₿</span>
+              <div><span className="panel-kicker">MARKET</span><h2>{symbol}</h2></div>
             </div>
             <div className="mark-block">
               <span className="metric-label">MARK PRICE</span>
               <strong className="mark-value">{markPrice ? `$${formatPrice(markPrice)}` : "—"}</strong>
-              {markFreshness && <span className="market-freshness">{markFreshness}</span>}
             </div>
+            <MarketTrend symbol={symbol} mark={market?.mark ?? null} />
             <div className="book-heading"><span>TOP OF BOOK</span><span>PRICE <small>·</small> SIZE</span></div>
             {market?.depth ? <div className="book-table">
               <div className="book-side book-side--ask"><span>ASK</span><strong>{ask ? `$${formatPrice(ask.price)}` : "—"}</strong><small>{ask?.size ?? "—"}</small></div>
@@ -823,7 +828,7 @@ export function App() {
             <div className="round-card panel">
               <div className="round-left">
                 <span className="panel-kicker">{round ? round.status.replaceAll("_", " ") : "NO ACTIVE ROUND"}</span>
-                <div className="round-title-row"><h2>Two sides. One score.</h2><span className="round-length"><Icon name="clock" size={14} /> {countdown ?? "180 SEC"}</span></div>
+                <div className="round-title-row"><h2>Three minutes on the clock</h2><span className="round-length"><Icon name="clock" size={14} /> {countdown ?? "180 SEC"}</span></div>
               </div>
               <button className="button button--join" onClick={() => {
                 if (participantJoined || round?.status === "active") { navigate("/arena"); setTab("quotes"); }
@@ -836,8 +841,8 @@ export function App() {
             </div>
 
             <div className="quote-section-heading">
-                <div><h2>Quote both sides</h2></div>
-              <StatusPill state={currentMarketState === "live" ? "waiting" : "paused"}>{currentMarketState !== "live" ? "PAUSED" : round?.status === "active" ? "ACTIVE" : "WAITING"}</StatusPill>
+                <div><h2>Your quotes</h2></div>
+              <StatusPill state="waiting">{round?.status === "active" ? "ACTIVE" : "WAITING"}</StatusPill>
             </div>
             <div className="quote-grid">
               {(["buy", "sell"] as const).map(side => {
@@ -850,8 +855,8 @@ export function App() {
                     : "paused" as const;
                 const openOrder = order?.exchange_status === "open" && order.intent_status === "observed"
                   && order.exchange_order_id && /^[1-9]\d{0,18}$/.test(order.exchange_order_id) ? order : null;
-                return <QuoteCard key={side} side={side === "buy" ? "bid" : "ask"} value={quoteDrafts[side]}
-                  status={status} statusState={statusState} canReview={canReviewQuote(side)}
+                return <QuoteCard key={side} unit={baseAsset(symbol)} side={side === "buy" ? "bid" : "ask"} value={quoteDrafts[side]}
+                  status={status} statusState={statusState}
                   openOrder={openOrder} canRequote={Boolean(liveAccount && round?.status === "active" && roundData.health === "current")}
                   onRequote={startRequote}
                   onChange={(field, value) => setQuoteDrafts(previous => ({ ...previous, [side]: { ...previous[side], [field]: value } }))}
@@ -866,7 +871,7 @@ export function App() {
               <section className={`panel order-panel ${tab === "standings" ? "mobile-show" : ""}`}>
                 <div className="panel-heading panel-heading--compact"><h2>Your offers</h2></div>
                 <OrderRecords orders={roundData.orders} current={roundData.health === "current"} onCancel={cancelObservedOrder} canCancel={liveAccount} cancelingOrderIds={cancelingOrderIds} />
-                <button className="text-button" onClick={() => setDialog("orders")}>Open order details <Icon name="arrow" size={14} /></button>
+                <button className="text-button" onClick={() => setDialog("orders")}>Order details <Icon name="arrow" size={14} /></button>
                 <button className="text-button risk-access" onClick={() => { setDialog("risk"); void refreshRisk(); }}>Margin and positions <Icon name="shield" size={14} /></button>
               </section>
             </div>
@@ -875,10 +880,7 @@ export function App() {
           <aside className={`right-column ${tab !== "standings" ? "mobile-hidden" : ""}`}>
             <ScorePanel data={roundData} now={serverNow} />
             <StandingsPanel data={roundData} />
-            <section className="panel activity-panel">
-                <div className="panel-heading panel-heading--compact"><h2>Recent activity</h2></div>
-              <OrderRecords orders={roundData.orders.filter(order => order.observed_at).slice(0, 4)} current={roundData.health === "current"} activity onCancel={cancelObservedOrder} canCancel={liveAccount} cancelingOrderIds={cancelingOrderIds} />
-            </section>
+            <MarketActivity symbol={symbol} />
           </aside>
         </div>
 
@@ -895,6 +897,7 @@ export function App() {
       </div>}
 
       <AppDialog
+        symbol={symbol}
         orders={roundData.orders}
         ordersCurrent={roundData.health === "current"}
         canJoinRound={canJoinRound}
@@ -934,14 +937,14 @@ export function App() {
   );
 }
 
-function QuoteCard({ side, onReview, value, onChange, status, statusState, canReview, openOrder, canRequote, onRequote }: {
+function QuoteCard({ unit, side, onReview, value, onChange, status, statusState, openOrder, canRequote, onRequote }: {
+  unit: string;
   side: "bid" | "ask";
   onReview: () => void;
   value: { price: string; size: string };
   onChange: (field: "price" | "size", value: string) => void;
   status: string;
   statusState: "live" | "waiting" | "paused";
-  canReview: boolean;
   openOrder: ObservedOrder | null;
   canRequote: boolean;
   onRequote: (order: ObservedOrder) => void;
@@ -949,19 +952,19 @@ function QuoteCard({ side, onReview, value, onChange, status, statusState, canRe
   const isBid = side === "bid";
   return <article className={`quote-card panel quote-card--${side}`}>
     <div className="quote-card-top">
-      <div className="quote-side-title"><span className="quote-glyph">{isBid ? "↙" : "↗"}</span><div><span className="panel-kicker">{isBid ? "BUY SIDE" : "SELL SIDE"}</span><h3>{isBid ? "Bid" : "Ask"}</h3></div></div>
-      <StatusPill state={statusState}>{status}</StatusPill>
+      <div className="quote-side-title"><span className="quote-glyph">{isBid ? <ArrowDownLeftIcon size={20} weight="bold"/> : <ArrowUpRightIcon size={20} weight="bold"/>}</span><h3>{isBid ? "Buy" : "Sell"}</h3></div>
+      {status !== "NOT JOINED" && status !== "READY" && <StatusPill state={statusState}>{status}</StatusPill>}
     </div>
     <div className="quote-fields">
-      <label>PRICE <span>USD</span><div className="input-shell"><span>$</span><input aria-label={`${isBid ? "Bid" : "Ask"} price`} inputMode="decimal" value={value.price} onChange={event => onChange("price", event.target.value)} disabled={!canReview} /></div></label>
-      <label>SIZE <span>BTC</span><div className="input-shell"><input aria-label={`${isBid ? "Bid" : "Ask"} size`} inputMode="decimal" value={value.size} onChange={event => onChange("size", event.target.value)} disabled={!canReview} /><span>BTC</span></div></label>
+      <label>Price<div className="input-shell"><span>$</span><input aria-label={`${isBid ? "Bid" : "Ask"} price`} inputMode="decimal" value={value.price} onChange={event => onChange("price", event.target.value)} disabled={Boolean(openOrder)} /></div></label>
+      <label>Amount<div className="input-shell"><input aria-label={`${isBid ? "Bid" : "Ask"} size`} inputMode="decimal" value={value.size} onChange={event => onChange("size", event.target.value)} disabled={Boolean(openOrder)} /><span className="input-unit">{unit}</span></div></label>
     </div>
     {openOrder
       ? <button className={`button quote-button quote-button--${side}`} onClick={() => onRequote(openOrder)} disabled={!canRequote}>
-        Requote {isBid ? "bid" : "ask"} <Icon name="arrow" size={15} />
+        Requote {isBid ? "buy" : "sell"} <Icon name="arrow" size={15} />
       </button>
       : <button className={`button quote-button quote-button--${side}`} onClick={onReview}>
-        Review {isBid ? "bid" : "ask"} <Icon name="arrow" size={15} />
+        Review {isBid ? "buy" : "sell"} <Icon name="arrow" size={15} />
       </button>}
   </article>;
 }
@@ -973,8 +976,8 @@ function OrderRecords({ orders, current, activity = false, onCancel, canCancel, 
   if (!orders.length) return <div className="empty-orders"><p>{!current ? "Order status unavailable. Offers may still be open." : activity ? "No recent activity" : "No offers yet"}</p></div>;
   return <div className="order-records">{!current && <p role="status">Order status unavailable. Offers may still be open.</p>}{[...orders].reverse().map(order => <article className="order-record" key={order.client_order_id} data-client-order-id={order.client_order_id}>
     <div><strong>{order.side === "buy" ? "Bid" : "Ask"}</strong><span>{readableOrderStatus(order)}</span></div>
-    <p>{order.price ? `$${formatPrice(order.price)}` : "Price pending"} · {order.original_qty ?? "—"} BTC</p>
-    <small>{order.filled_qty === null ? "Fill details pending" : `${order.filled_qty} BTC filled`}</small>
+    <p>{order.price ? `$${formatPrice(order.price)}` : "Price pending"} · {order.original_qty ?? "—"} {baseAsset(order.symbol ?? "BTC-USD")}</p>
+    <small>{order.filled_qty === null ? "Fill details pending" : `${order.filled_qty} ${baseAsset(order.symbol ?? "BTC-USD")} filled`}</small>
     {!activity && <>
       {order.exchange_status === "open" && <button className="text-button order-cancel" onClick={() => onCancel(order)}
         disabled={!canCancel || !/^[1-9]\d{0,18}$/.test(order.exchange_order_id ?? "") || cancelingOrderIds.has(order.client_order_id)}>

@@ -1,3 +1,4 @@
+import { isMarketSymbol } from "../../shared/markets";
 import type { StrikeSide } from "../../shared/contracts";
 import { getCurrentApiSession, strikeAuthenticatedFetch, strikeCancelOrderById } from "./builderConnect";
 
@@ -23,7 +24,7 @@ export interface StrikeCreateOrderResponse {
 }
 
 export async function placePostOnlyLimitOrder(input: PostOnlyLimitInput): Promise<StrikeCreateOrderResponse> {
-  if (!input.intent.clientOrderId || !input.intent.roundId) {
+  if (!input.intent.clientOrderId || !input.intent.roundId || !isMarketSymbol(input.intent.symbol)) {
     throw new Error("A server-issued order intent is required.");
   }
   const isPositiveDecimal = (value: string) => /^\d+(?:\.\d+)?$/.test(value) && /[1-9]/.test(value);
@@ -54,7 +55,7 @@ export async function cancelToruniOrder(input: {
   exchangeOrderId: string;
   symbol: string;
 }): Promise<unknown> {
-  if (!/^trn[0-9a-f]{32}$/.test(input.clientOrderId) || input.symbol !== "BTC-USD"
+  if (!/^trn[0-9a-f]{32}$/.test(input.clientOrderId) || !isMarketSymbol(input.symbol)
     || !/^[1-9]\d{0,18}$/.test(input.exchangeOrderId) || BigInt(input.exchangeOrderId) > 9_223_372_036_854_775_807n) {
     throw new Error("A verified Toruni order is required.");
   }

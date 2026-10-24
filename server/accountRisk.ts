@@ -16,14 +16,14 @@ function add(a: { coefficient: bigint; scale: number }, b: { coefficient: bigint
   return { coefficient: left + right, scale };
 }
 
-export async function readAccountRisk(accountId: string): Promise<AccountRiskEvidence> {
+export async function readAccountRisk(accountId: string, symbol = "BTC-USD"): Promise<AccountRiskEvidence> {
   const [account, positionRead, mark] = await Promise.all([
-    readPublicAccount({ accountId }), readPublicPositions(accountId), readFreshMark("BTC-USD"),
+    readPublicAccount({ accountId }), readPublicPositions(accountId), readFreshMark(symbol),
   ]);
   if (!mark) throw new RoundGuardError("Strike market data is stale. Refresh before joining or reviewing a quote.", 503);
-  const settings = account.symbolSettings?.["BTC-USD"];
+  const settings = account.symbolSettings?.[symbol];
   if (!settings || settings.leverage !== 1) {
-    throw new RoundGuardError("Set BTC-USD to 1x in Strike before joining.", 423);
+    throw new RoundGuardError(`Set ${symbol} to 1x in Strike before joining.`, 423);
   }
 
   const markValue = parseDecimal(mark.markPrice);
@@ -33,7 +33,7 @@ export async function readAccountRisk(accountId: string): Promise<AccountRiskEvi
     const size = parseDecimal(position.size);
     if (!size) throw new RoundGuardError("Strike position size could not be verified.", 503);
     if (size.coefficient === 0n) continue;
-    if (position.symbol !== "BTC-USD" || position.leverage !== 1) {
+    if (position.symbol !== symbol || position.leverage !== 1) {
       throw new RoundGuardError("Close or manage other positions in Strike before joining this round.", 423);
     }
     const magnitude = { ...size, coefficient: size.coefficient < 0n ? -size.coefficient : size.coefficient };

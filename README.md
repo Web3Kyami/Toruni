@@ -1,8 +1,10 @@
 # Toruni
 
-Toruni is a 180-second market-making challenge for BTC-USD. Players practice providing liquidity by placing a bid and an ask, then earn points while their quotes stay open and competitive.
+Toruni is a 180-second market-making challenge. Players practice providing liquidity by placing a bid and an ask, then earn points while their quotes stay open and competitive.
 
-Toruni currently supports BTC-USD. As Strike adds markets to its V2 testnet, we plan to add them to the challenge.
+Choose BTC-USD, ETH-USD or SOL-USD before starting a challenge. Each round uses one market, with its own order sizes, price increments and minimum order value. Market availability follows Strike V2 testnet; markets with inconsistent trading limits stay unavailable. We plan to add more markets as Strike makes them available.
+
+The arena includes a price trend drawn from Strike’s candle history and recent verified offers from all makers. The activity feed keeps up to 40 offers, with four visible at a time.
 
 [Open the arena](https://toruni.vercel.app/) · [How a round works](#a-round) · [Run locally](#run-locally)
 
@@ -14,7 +16,7 @@ Toruni currently supports BTC-USD. As Strike adds markets to its V2 testnet, we 
 
 ```mermaid
 flowchart TD
-    A[Watch the BTC-USD market] --> B[Connect a wallet and check your account]
+    A[Choose a market and watch its prices] --> B[Connect a wallet and check your account]
     B --> C[Join or start a 180-second round]
     C --> D[Place a bid and an ask]
     D --> E[Strike receives the orders]
@@ -67,6 +69,8 @@ The wallet signs Builder Connect to register an Ed25519 API wallet. The browser 
 
 The verifier reads market, account-risk, and order state independently from Strike. Authenticated exchange requests are pinned to `https://api-v2-testnet.strikefinance.org`. Mainnet is not a configurable target.
 
+The market is fixed when a round is created. Admission, risk checks, quote intents and scoring use that saved market. The public activity feed returns the latest independent observation for each offer, without wallet addresses or account identifiers.
+
 ## Run locally
 
 Use Node.js 22.18 or newer and npm.
@@ -117,7 +121,7 @@ On Vercel, a successful round join starts a bounded scorer job. A request can re
 - `src/`: interface, wallet connection, Builder Connect, and browser-side Strike order requests.
 - `server/`: sessions, HTTP API, independent Strike reads, round lifecycle, verification, and scoring.
 - `shared/`: typed contracts, exact decimal checks, scoring policy, and deterministic ledger replay.
-- `sql/`: ordered PostgreSQL migrations.
+- `sql/`: ordered PostgreSQL migrations, including the supported-market constraint.
 - `api/`: Vercel HTTP entry points.
 - `tests/`: scoring, validation, lifecycle, API, and worker checks.
 

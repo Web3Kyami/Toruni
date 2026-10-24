@@ -1,3 +1,4 @@
+import { baseAsset } from "../../shared/markets";
 import { useCallback, useEffect, useState } from "react";
 import { readRoundAudit, readRoundReport, RoundNotFoundError, type AuditSample, type RoundReport } from "../api/rounds";
 import type { ObservedOrder } from "../api/useRoundData";
@@ -50,7 +51,7 @@ export function Results({ roundId, onBack, onRules, myOrders = [], canCancel = f
           const ownOrder = myOrders.find(item => item.client_order_id === order.client_order_id);
           const canRequestCancel = canCancel && ownOrder?.exchange_status === "open" && Boolean(ownOrder.exchange_order_id);
           const cancelRequested = cancelingOrderIds.has(order.client_order_id);
-          return <tr key={order.client_order_id}><td data-label="Side">{order.side === "buy" ? "Bid" : "Ask"}</td><td data-label="Price">{formatPrice(order.price)}</td><td data-label="Size">{formatBtc(order.original_qty)}</td><td data-label="Filled">{formatBtc(order.filled_qty)}</td><td data-label="Status">{resultOrderStatus(order.exchange_status)}</td>
+          return <tr key={order.client_order_id}><td data-label="Side">{order.side === "buy" ? "Bid" : "Ask"}</td><td data-label="Price">{formatPrice(order.price)}</td><td data-label="Size">{formatAmount(order.original_qty, report.round.symbol)}</td><td data-label="Filled">{formatAmount(order.filled_qty, report.round.symbol)}</td><td data-label="Status">{resultOrderStatus(order.exchange_status)}</td>
             <td data-label="Action">{canRequestCancel ? <button className="text-button" onClick={() => onCancel?.(order.client_order_id)} disabled={cancelRequested}>{cancelRequested ? "Checking…" : "Cancel offer"}</button> : "—"}</td></tr>;
         })}</tbody></table></div>}
       </section>
@@ -81,10 +82,10 @@ function formatPrice(value: string): string {
     : "Unavailable";
 }
 
-function formatBtc(value: string): string {
+function formatAmount(value: string, symbol: string): string {
   const amount = Number(value);
   return /^\d+(?:\.\d+)?$/.test(value) && Number.isFinite(amount) && amount >= 0
-    ? `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 }).format(amount)} BTC`
+    ? `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 8 }).format(amount)} ${baseAsset(symbol)}`
     : "Unavailable";
 }
 

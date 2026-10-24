@@ -7,7 +7,7 @@ export interface GamePolicy {
   requiredCollateral: string | null;
 }
 export interface JoinResult { participantId: string; roundId: string; startsAt: number; verificationState: "unverified" }
-export interface ServerIssuedOrderIntent { clientOrderId: string; roundId: string; symbol: "BTC-USD"; side: StrikeSide }
+export interface ServerIssuedOrderIntent { clientOrderId: string; roundId: string; symbol: string; side: StrikeSide }
 export interface IntentResult { intent: ServerIssuedOrderIntent; validation: { notional: string }; marketCheckedAt: number }
 
 let csrfToken = "";
@@ -45,8 +45,8 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return payload as T;
 }
 
-export async function readGamePolicy(): Promise<GamePolicy> {
-  const response = await fetch("/api/game-policy", { cache: "no-store", signal: AbortSignal.timeout(5_000) });
+export async function readGamePolicy(symbol = "BTC-USD"): Promise<GamePolicy> {
+  const response = await fetch(`/api/game-policy?symbol=${encodeURIComponent(symbol)}`, { cache: "no-store", signal: AbortSignal.timeout(5_000) });
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok || !payload || typeof payload !== "object" || typeof (payload as GamePolicy).ready !== "boolean") {
     throw new Error("Round settings could not be checked.");
@@ -54,10 +54,10 @@ export async function readGamePolicy(): Promise<GamePolicy> {
   return payload as GamePolicy;
 }
 
-export function joinCurrentRound(accountId: string): Promise<JoinResult> {
-  return post("/api/rounds/current/join", { accountId });
+export function joinCurrentRound(accountId: string, symbol = "BTC-USD"): Promise<JoinResult> {
+  return post("/api/rounds/current/join", { accountId, symbol });
 }
 
-export function requestQuoteIntent(draft: { side: StrikeSide; price: string; size: string }): Promise<IntentResult> {
+export function requestQuoteIntent(draft: { side: StrikeSide; price: string; size: string; symbol: string }): Promise<IntentResult> {
   return post("/api/quote-intents", draft);
 }

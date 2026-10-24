@@ -40,6 +40,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
   let lastRiskPoll = 0;
   let lastMarkPoll = 0;
   let activeRoundId: string | null = null;
+  let activeSymbol = "BTC-USD";
   let activeRound: { id: string; status: RoundStatus; startsAt: number; endsAt: number } | null = null;
   let lastSampleSlot: number | null = null;
   let lastPublished = 0;
@@ -94,12 +95,12 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
       const jobs: Promise<unknown>[] = [];
       if (now - lastRulesRead >= 15_000 || !engineRules) {
         lastRulesRead = now;
-        jobs.push(readMarketSnapshot("BTC-USD").then(snapshot => { engineRules = snapshot.marketRules; }));
+        jobs.push(readMarketSnapshot(activeSymbol).then(snapshot => { engineRules = snapshot.marketRules; }));
       }
       if (now - lastMarkPoll >= 1000) {
         lastMarkPoll = now;
         jobs.push((async () => {
-          const mark = await readFreshMark();
+          const mark = await readFreshMark(activeSymbol);
           if (mark && mayWriteRound(roundId)) await query(`INSERT INTO market_observations (round_id,observed_at,exchange_event_at,mark,source,data_status)
             VALUES ($1,$2,$3,$4,'strike-v2-testnet','healthy')`, [roundId, new Date(), new Date(mark.observedAt), mark.markPrice]);
         })());
@@ -111,9 +112,9 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
           for (const participant of participants) {
             try {
             const [account, positions, mark] = await Promise.all([
-              readPublicAccount({ accountId: participant.account_id as string }), readPublicPositions(participant.account_id as string), readFreshMark(),
+              readPublicAccount({ accountId: participant.account_id as string }), readPublicPositions(participant.account_id as string), readFreshMark(activeSymbol),
             ]);
-            if (!mark || account.symbolSettings?.["BTC-USD"]?.leverage !== 1) continue;
+            if (!mark || account.symbolSettings?.[activeSymbol]?.leverage !== 1) continue;
             const markValue = parseDecimal(mark.markPrice);
             if (!markValue) continue;
             let exposure = { coefficient: 0n, scale: 0 };
@@ -122,7 +123,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
               const size = parseDecimal(position.size);
               if (!size) { supported = false; break; }
               if (size.coefficient === 0n) continue;
-              if (position.symbol !== "BTC-USD" || position.leverage !== 1) { supported = false; break; }
+              if (position.symbol !== activeSymbol || position.leverage !== 1) { supported = false; break; }
               const notional = multiplyDecimals({ ...size, coefficient: size.coefficient < 0n ? -size.coefficient : size.coefficient }, markValue);
               const scale = Math.max(exposure.scale, notional.scale);
               exposure = { coefficient: exposure.coefficient * 10n ** BigInt(scale - exposure.scale) + notional.coefficient * 10n ** BigInt(scale - notional.scale), scale };
@@ -204,7 +205,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
       sampleTask = (async () => {
         const participants = await query("SELECT id FROM participants WHERE round_id=$1 AND verification_state='verified' LIMIT 8", [currentRound.id]);
         const sampleTime = Date.now();
-        const minimum = engineRules && sampleTime >= engineRules.observedAt && sampleTime - engineRules.observedAt <= 30_000
+        const minimum = engineRules && engineRules.symbol === activeSymbol && sampleTime >= engineRules.observedAt && sampleTime - engineRules.observedAt <= 30_000
           && engineRules.status === "trading" && !engineRules.reduceOnly ? engineRules.minimumNotional : null;
         for (const participant of participants) {
           if (!mayWriteRound(currentRound.id)) break;
@@ -259,6 +260,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
       const roundId = round.id as string;
       if (activeRoundId !== roundId) {
         activeRoundId = roundId;
+        activeSymbol = round.market as string;
         engineRules = null;
         lastSampleSlot = null;
         lastRulesRead = 0;

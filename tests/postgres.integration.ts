@@ -34,7 +34,7 @@ export async function runPostgresChecks() {
       await client.query("UPDATE rounds SET status='active' WHERE id=$1", [roundId]);
       await assert.rejects(issueQuoteIntent(client, sessionHash, "buy", now), /active round/); checks++;
       const at = now + 16_000;
-      const risk = { availableBalance: "1000", currentAbsoluteExposure: "0", requestedNotional: "100.245", maximumAccountExposure: "200", price: "81500", size: "0.00123" };
+      const risk = { symbol: "BTC-USD", availableBalance: "1000", currentAbsoluteExposure: "0", requestedNotional: "100.245", maximumAccountExposure: "200", price: "81500", size: "0.00123" };
       const intent = await issueQuoteIntent(client, sessionHash, "buy", at, risk);
       assert.match(intent.clientOrderId, /^trn[0-9a-f]{32}$/); checks++;
       await assert.rejects(issueQuoteIntent(client, sessionHash, "buy", at, risk), /existing quote/); checks++;
