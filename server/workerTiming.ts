@@ -1,4 +1,6 @@
-export const ORDER_POLL_CHECK_INTERVAL_MS = 1_000;
+// next_verify_at is two seconds after the last proof. Half-second checks keep
+// boundary jitter below the three-second evidence freshness limit.
+export const ORDER_POLL_CHECK_INTERVAL_MS = 500;
 
 export function nextOrderPollDelay(elapsedMs: number): number {
   if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return ORDER_POLL_CHECK_INTERVAL_MS;
