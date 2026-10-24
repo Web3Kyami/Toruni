@@ -27,6 +27,14 @@ export interface AuditedTick {
   scoringVersion: typeof scoringConstants.version;
 }
 
+/** Enumerates missed one-second slots as zero-score gaps, never as replay credit. */
+export function missingSamplerSlots(previousSampleAt: number, sampledAt: number): number[] {
+  if (!Number.isSafeInteger(previousSampleAt) || !Number.isSafeInteger(sampledAt) || sampledAt <= previousSampleAt) return [];
+  const slots: number[] = [];
+  for (let slot = previousSampleAt + 1_000; slot < sampledAt; slot += 1_000) slots.push(slot);
+  return slots;
+}
+
 function zeroTick(tick: ObservedTick, reason: AuditedTick["reason"]): AuditedTick {
   return {
     sampledAt: tick.sampledAt, deltaScaled: "0", pointsPerMinuteScaled: "0",

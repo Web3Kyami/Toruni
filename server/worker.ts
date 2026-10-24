@@ -30,6 +30,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
   let timer: ReturnType<typeof setTimeout> | null = null;
   let cycleTask: Promise<void> | null = null;
   let collectionTask: Promise<void> | null = null;
+  let orderTask: Promise<void> | null = null;
   let engineRules: StrikeMarketRules | null = null;
   let lastRulesRead = 0;
   let lastOrderPoll = 0;
@@ -52,6 +53,39 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
     await query(`UPDATE quote_intents SET first_open_observed_at=NULL,last_verified_at=NULL,
       verification_error='reconciling-after-restart',next_verify_at=NULL WHERE status<>'terminal'`);
   };
+  const collectOrders = async (roundId: string, now: number) => {
+    const intents = await query(`SELECT qi.*,p.claimed_account_id,r.market FROM quote_intents qi
+      JOIN participants p ON p.id=qi.participant_id JOIN rounds r ON r.id=qi.round_id
+      WHERE qi.round_id=$1 AND qi.status<>'terminal' AND (qi.next_verify_at IS NULL OR qi.next_verify_at<=$2)
+      ORDER BY qi.created_at LIMIT 16`, [roundId, new Date(now)]);
+    // Keep order proof independent from slower market and risk reads.
+    for (let index = 0; index < intents.length; index += 2) await Promise.all(intents.slice(index, index + 2).map(async intent => {
+      try {
+        const result = await verifyPublicOrder({ accountId: intent.claimed_account_id as string,
+          clientOrderId: intent.client_order_id as string, symbol: intent.market as string, side: intent.side as "buy" | "sell",
+          firstOpenObservedAt: intent.first_open_observed_at instanceof Date ? intent.first_open_observed_at.getTime() : null,
+          lastVerifiedAt: intent.last_verified_at instanceof Date ? intent.last_verified_at.getTime() : undefined });
+        if (!mayWrite()) return;
+        if (result.kind === "observed") {
+          await transaction(client => mayWrite() ? recordOrderObservation(client, result.quote) : Promise.resolve());
+          return;
+        }
+        const failures = Number(intent.verification_failures) + 1;
+        const code = result.kind === "unavailable" ? `strike-${result.status}` : result.kind;
+        const delay = result.kind === "unavailable" && result.status === 429 ? Math.min(30_000, 2_000 * 2 ** Math.min(failures, 4)) : 2_000;
+        await query(`UPDATE quote_intents SET status='unknown',verification_error=$1,verification_failures=$2,
+          last_checked_at=$3,next_verify_at=$4,first_open_observed_at=NULL,last_verified_at=NULL WHERE id=$5 AND status<>'terminal'`,
+          [code, failures, new Date(), new Date(Date.now() + delay), intent.id]);
+      } catch (error) {
+        // A transient failure for one quote must not prevent its paired quote from being observed.
+        if (!mayWrite()) return;
+        const failures = Number(intent.verification_failures) + 1;
+        await query(`UPDATE quote_intents SET status='unknown',verification_error=$1,verification_failures=$2,
+          last_checked_at=$3,next_verify_at=$4,first_open_observed_at=NULL,last_verified_at=NULL WHERE id=$5 AND status<>'terminal'`,
+          [`verification-${failureLabel(error)}`, failures, new Date(), new Date(Date.now() + 2_000), intent.id]);
+      }
+    }));
+  };
   const collect = async (roundId: string, now: number) => {
     if (collectionRunning) return;
     collectionRunning = true;
@@ -67,33 +101,6 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
           const mark = await readFreshMark();
           if (mark && mayWrite()) await query(`INSERT INTO market_observations (round_id,observed_at,exchange_event_at,mark,source,data_status)
             VALUES ($1,$2,$3,$4,'strike-v2-testnet','healthy')`, [roundId, new Date(), new Date(mark.observedAt), mark.markPrice]);
-        })());
-      }
-      if (now - lastOrderPoll >= 2_000) {
-        lastOrderPoll = now;
-        jobs.push((async () => {
-          const intents = await query(`SELECT qi.*,p.claimed_account_id,r.market FROM quote_intents qi
-            JOIN participants p ON p.id=qi.participant_id JOIN rounds r ON r.id=qi.round_id
-            WHERE qi.round_id=$1 AND qi.status<>'terminal' AND (qi.next_verify_at IS NULL OR qi.next_verify_at<=$2)
-            ORDER BY qi.created_at LIMIT 16`, [roundId, new Date(now)]);
-          // Two readers at a time bound exchange concurrency and database use.
-          for (let index = 0; index < intents.length; index += 2) await Promise.all(intents.slice(index, index + 2).map(async intent => {
-            const result = await verifyPublicOrder({ accountId: intent.claimed_account_id as string,
-              clientOrderId: intent.client_order_id as string, symbol: intent.market as string, side: intent.side as "buy" | "sell",
-              firstOpenObservedAt: intent.first_open_observed_at instanceof Date ? intent.first_open_observed_at.getTime() : null,
-              lastVerifiedAt: intent.last_verified_at instanceof Date ? intent.last_verified_at.getTime() : undefined });
-            if (!mayWrite()) return;
-            if (result.kind === "observed") {
-              await transaction(client => mayWrite() ? recordOrderObservation(client, result.quote) : Promise.resolve());
-            } else {
-              const failures = Number(intent.verification_failures) + 1;
-              const code = result.kind === "unavailable" ? `strike-${result.status}` : result.kind;
-              const delay = result.kind === "unavailable" && result.status === 429 ? Math.min(30_000, 2_000 * 2 ** Math.min(failures, 4)) : 2_000;
-              await query(`UPDATE quote_intents SET status='unknown',verification_error=$1,verification_failures=$2,
-                last_checked_at=$3,next_verify_at=$4,first_open_observed_at=NULL,last_verified_at=NULL WHERE id=$5 AND status<>'terminal'`,
-                [code, failures, new Date(), new Date(Date.now() + delay), intent.id]);
-            }
-          }));
         })());
       }
       if (now - lastRiskPoll >= 2_000) {
@@ -165,6 +172,17 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
           })
           .finally(() => { collectionTask = null; });
       }
+      if (!orderTask && now - lastOrderPoll >= 2_000) {
+        lastOrderPoll = now;
+        orderTask = collectOrders(round.id as string, now)
+          .catch(error => {
+            if (Date.now() - lastDiagnosticAt >= 10_000) {
+              lastDiagnosticAt = Date.now();
+              process.stderr.write(`Toruni order verification paused (${failureLabel(error)}).\n`);
+            }
+          })
+          .finally(() => { orderTask = null; });
+      }
       stage = "pending-order lookup";
       const pending = await query<{ count: string }>("SELECT count(*) FROM quote_intents WHERE round_id=$1 AND status<>'terminal'", [round.id]);
       stage = "round transition";
@@ -217,7 +235,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
     stopped = true;
     if (timer) clearTimeout(timer);
     if (!readySettled) markReady(false);
-    const drained = await drainWorkerTasks([cycleTask, collectionTask], WORKER_STOP_DRAIN_MS);
+    const drained = await drainWorkerTasks([cycleTask, collectionTask, orderTask], WORKER_STOP_DRAIN_MS);
     if (!drained) process.stderr.write("Toruni scorer released its leader after the shutdown drain limit.\n");
     const currentLeader = leader;
     leader = null;

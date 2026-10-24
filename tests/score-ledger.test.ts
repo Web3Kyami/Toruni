@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { auditObservedTick, replayObservedTicks, type ObservedTick } from "../shared/scoreLedger.ts";
+import { auditObservedTick, missingSamplerSlots, replayObservedTicks, type ObservedTick } from "../shared/scoreLedger.ts";
 import { formatScore } from "../shared/scoring.ts";
 import type { VerifiedQuote } from "../shared/contracts.ts";
 
@@ -43,6 +43,12 @@ test("sampler gaps and restart never catch up missed seconds", () => {
   const gap = replayObservedTicks(Array.from({ length: 20 }, (_, i) => tick(i + 1)).filter((row) => row.sampledAt !== tick(10).sampledAt), window);
   assert.ok(gap.totalScaled < full.totalScaled);
   assert.equal(gap.samples.find((row) => row.sampledAt === tick(11).sampledAt)?.deltaScaled, "0");
+});
+
+test("missed production sampler slots become zeros so later live ticks can resume", () => {
+  assert.deepEqual(missingSamplerSlots(startsAt + 1_000, startsAt + 4_000), [startsAt + 2_000, startsAt + 3_000]);
+  assert.deepEqual(missingSamplerSlots(startsAt + 3_000, startsAt + 4_000), []);
+  assert.deepEqual(missingSamplerSlots(startsAt, startsAt + 1_000), []);
 });
 
 test("account mismatches, absent risk evidence, and post-round observations earn zero", () => {

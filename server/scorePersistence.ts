@@ -1,6 +1,6 @@
 import type { PoolClient, QueryResultRow } from "pg";
 import type { ScorePolicy, StrikeMark, VerifiedQuote } from "../shared/contracts.ts";
-import { auditObservedTick } from "../shared/scoreLedger.ts";
+import { auditObservedTick, missingSamplerSlots } from "../shared/scoreLedger.ts";
 import { scoringConstants } from "../shared/scoring.ts";
 import type { RoundRules } from "./roundService.ts";
 
@@ -22,8 +22,19 @@ export async function persistScoreTick(client: PoolClient, roundId: string, part
   const endsAt = (round.ends_at as Date).getTime();
   if (sampledAt <= startsAt || sampledAt > endsAt || (sampledAt - startsAt) % 1000 !== 0) return false;
   const previous = await client.query<{ latest: Date | null }>("SELECT max(sampled_at) AS latest FROM score_samples WHERE round_id=$1 AND participant_id=$2", [roundId, participantId]);
-  const previousAt = previous.rows[0]?.latest?.getTime() ?? startsAt;
+  let previousAt = previous.rows[0]?.latest?.getTime() ?? startsAt;
   if (previousAt >= sampledAt) return false;
+  const missedSlots = missingSamplerSlots(previousAt, sampledAt);
+  if (missedSlots.length) {
+    await client.query(`INSERT INTO score_samples (round_id,participant_id,sampled_at,delta_scaled,
+      points_per_minute_scaled,bid_quality_scaled,ask_quality_scaled,reason,scoring_version)
+      SELECT $1,$2,slot,0,0,0,0,$5,$6
+      FROM generate_series($3::timestamptz,$4::timestamptz,interval '1 second') AS slots(slot)
+      ON CONFLICT (round_id,participant_id,sampled_at) DO NOTHING`, [roundId, participantId,
+      new Date(missedSlots[0]!), new Date(missedSlots[missedSlots.length - 1]!),
+      JSON.stringify({ reason: "sampler-gap", bid: "sampler-gap", ask: "sampler-gap" }), scoringConstants.version]);
+    previousAt = sampledAt - 1_000;
+  }
   const at = new Date(sampledAt);
   const markRow = (await client.query(`SELECT * FROM market_observations WHERE round_id=$1 AND observed_at<=$2 AND data_status='healthy' ORDER BY observed_at DESC LIMIT 1`, [roundId, at])).rows[0];
   const risk = (await client.query(`SELECT * FROM risk_observations WHERE round_id=$1 AND participant_id=$2 AND observed_at<=$3 ORDER BY observed_at DESC LIMIT 1`, [roundId, participantId, at])).rows[0];
