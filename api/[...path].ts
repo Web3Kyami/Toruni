@@ -39,6 +39,7 @@ async function resumeStaleScoring(): Promise<void> {
   const heartbeat = await readScoringHeartbeat(current.round.id);
   if (shouldDispatchRoundScorer({ platformIsVercel: true, method: "GET", pathname: "/api/rounds/current",
     responseStatus: 200, roundStatus: current.round.status, heartbeatAt: heartbeat, now: Date.now() })) {
+    process.stderr.write("Toruni stale scoring heartbeat detected; resuming the round worker.\n");
     scheduleScoring(current.round.id);
   }
 }
@@ -63,7 +64,9 @@ export default async function api(request: IncomingMessage, response: ServerResp
           const current = await readCurrentRound();
           if (current.round) scheduleScoring(current.round.id);
         } else if (pollingCurrentRound) await resumeStaleScoring();
-      } catch { /* The HTTP response is already complete; a later poll can retry. */ }
+      } catch (error) {
+        process.stderr.write(`Toruni scorer dispatch check failed (${scoringFailureCode(error)}).\n`);
+      }
     }
   } catch {
     if (!response.headersSent) response.writeHead(503, {
