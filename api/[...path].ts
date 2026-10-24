@@ -8,6 +8,14 @@ import { shouldDispatchRoundScorer } from "../server/scoringDispatch.ts";
 const activeRuns = new Map<string, Promise<void>>();
 const lastScheduledAt = new Map<string, number>();
 
+function scoringFailureCode(error: unknown): string {
+  if (!error || typeof error !== "object") return "unknown";
+  const value = error as { name?: unknown; code?: unknown };
+  const name = typeof value.name === "string" && /^[A-Za-z][A-Za-z0-9]{0,31}$/.test(value.name) ? value.name : "Error";
+  const code = typeof value.code === "string" && /^[A-Z0-9_-]{1,32}$/.test(value.code) ? value.code : null;
+  return code ? `${name}:${code}` : name;
+}
+
 function scheduleScoring(roundId: string): void {
   if (activeRuns.has(roundId)) return;
   const now = Date.now();
@@ -17,7 +25,7 @@ function scheduleScoring(roundId: string): void {
     .then(result => {
       if (result === "time-limit") process.stderr.write("Toruni scoring invocation reached its round runtime limit.\n");
     })
-    .catch(() => { process.stderr.write("Toruni scoring invocation ended before the round was finalized.\n"); })
+    .catch(error => { process.stderr.write(`Toruni scoring invocation ended before the round was finalized (${scoringFailureCode(error)}).\n`); })
     .finally(() => { activeRuns.delete(roundId); });
   activeRuns.set(roundId, task);
   waitUntil(task);

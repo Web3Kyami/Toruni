@@ -191,7 +191,7 @@ export async function runRoundWorkerForRound(roundId: string, maxRuntimeMs = 280
       const rows = await query<{ status: string; pending_results: string }>(`SELECT r.status,
         (SELECT count(*)::text FROM participants p LEFT JOIN round_results rr
           ON rr.round_id=p.round_id AND rr.participant_id=p.id
-          WHERE p.round_id=r.id AND p.verification_state='verified' AND rr.id IS NULL) AS pending_results
+          WHERE p.round_id=r.id AND p.verification_state='verified' AND rr.participant_id IS NULL) AS pending_results
         FROM rounds r WHERE r.id=$1`, [roundId]);
       const round = rows[0];
       if (!round) return "round-missing";
