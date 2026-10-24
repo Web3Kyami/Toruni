@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
-import { readCurrentRound, readRoundReport, readRoundAudit, readLeaderboard, readParticipantSnapshot, query, transaction } from "./database.ts";
+import { readCurrentRound, readRoundReport, readRoundAudit, readLeaderboard, readParticipantSnapshot, query, scoringLeaderConfigured, transaction } from "./database.ts";
 import { issueSession, readSessionHash, requestHasTrustedOrigin, requireSession } from "./session.ts";
 import { openEventStream } from "./events.ts";
 import { readMarketSnapshot, readPublicAccount, readPublicPositions, StrikeReadError } from "./strike.ts";
@@ -122,7 +122,10 @@ export async function handle(request: IncomingMessage, response: ServerResponse)
 
   try {
     if (url.pathname === "/api/health") {
-      sendJson(response, 200, { service: "toruni-local-api", network: "strike-v2-testnet" });
+      let databaseReady = false;
+      try { await query("SELECT 1"); databaseReady = true; } catch { /* Health stays available to identify missing storage. */ }
+      sendJson(response, 200, { service: "toruni-api", network: "strike-v2-testnet", databaseReady,
+        scoringLeaderConfigured: scoringLeaderConfigured(), scorerRuntime: process.env.VERCEL ? "per-round" : "persistent" });
       return;
     }
     if (url.pathname === "/api/game-policy") {

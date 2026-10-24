@@ -17,7 +17,8 @@ Set these values in `.env.local`:
 | --- | --- |
 | `VITE_BUILDER_CODE` | Public Strike builder code registered on V2 testnet |
 | `VITE_BUILDER_FEE_BPS` | `0` for this build |
-| `DATABASE_URL` | Server-only PostgreSQL connection string |
+| `DATABASE_URL` | Server-only PostgreSQL connection for app queries; a pooler URL is supported |
+| `DATABASE_URL_UNPOOLED` | Server-only direct PostgreSQL connection for the scoring leader lock |
 | `APP_ORIGIN` | Exact browser origin, normally `http://localhost:5173` |
 | `TORUNI_MAX_QUOTE_NOTIONAL` | Owner-approved maximum value for one resting quote, in USD |
 | `TORUNI_MAX_ACCOUNT_EXPOSURE` | Owner-approved gross limit for positions and Toruni resting quotes, in USD; must cover two maximum quotes |
@@ -40,11 +41,11 @@ The service serves `dist/` and the API on port 4174 by default. Configure `APP_O
 
 ## Architecture
 
-The Vercel deployment serves the interface and the existing HTTP API through `api/[...path].ts`. Set `VITE_BUILDER_CODE`, `VITE_BUILDER_FEE_BPS`, and the server-only `DATABASE_URL` in the project environment. Sessions use the deployment's `VERCEL_URL` as their trusted origin unless `APP_ORIGIN` is configured for a custom domain. Client routes support direct navigation and refresh.
+The Vercel deployment serves the interface and HTTP API through `api/[...path].ts`. Configure the builder values and both server-only database URLs in the project environment. App queries use `DATABASE_URL`; the database-held scoring leader uses `DATABASE_URL_UNPOOLED` so a transaction pooler cannot break its session lock. Sessions use the deployment's `VERCEL_URL` as their trusted origin unless `APP_ORIGIN` is configured for a custom domain. Client routes support direct navigation and refresh.
 
-The submitted preview at [toruni.vercel.app](https://toruni.vercel.app) was deployed without `DATABASE_URL`, so it cannot persist sessions or run live rounds. Vercel request handlers also do not run the continuous scoring worker. A playable deployment needs PostgreSQL and the Node service running continuously on a persistent host.
+After a successful join, Vercel keeps a bounded scorer running in the background for that round. It samples at one-second intervals, and current-round polling can restart it if its market-data heartbeat goes stale. The round and settlement window fit within the configured 300-second function limit. This is continuous scoring during a round, not an always-on process between rounds; a standalone Node host runs the worker continuously.
 
-The scoring worker runs through `npm run start:server` on a persistent Node host sharing the same database. It is not started inside Vercel request handlers. Vercel clients poll persisted observations; the persistent Node service retains its event stream. Keep round entry closed until the worker and the approved risk limits are configured.
+The scoring worker also runs through `npm run start:server` on a persistent Node host sharing the same database. Vercel clients poll persisted observations; the persistent Node service retains its event stream. The `/api/health` response reports whether PostgreSQL and the direct scoring lock connection are configured and reachable.
 
 - `src/`: React interface, Builder Connect, browser-only Ed25519 signing, and testnet order adapters.
 - `src/api/deposits.ts`: Sepolia USDC quote, unsigned-transaction validation, and submission confirmation adapters. Preparation checks the connected network and deployed contracts, binds calldata to the account and quote, and permits only an exact-amount approval. It never broadcasts a transaction; a caller must obtain wallet approval, track its receipt, and separately verify credited Strike collateral.

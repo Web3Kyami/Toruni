@@ -8,7 +8,22 @@ const pool = process.env.DATABASE_URL ? new Pool({
   connectionTimeoutMillis: 3_000,
   idleTimeoutMillis: 30_000,
 }) : null;
+const configuredDatabaseUrl = process.env.DATABASE_URL;
+const configuredDatabaseIsPooler = (() => {
+  if (!configuredDatabaseUrl) return false;
+  try { return new URL(configuredDatabaseUrl).hostname.includes("-pooler."); }
+  catch { return false; }
+})();
+const leaderConnectionString = process.env.DATABASE_URL_UNPOOLED
+  || (configuredDatabaseIsPooler ? undefined : configuredDatabaseUrl);
+const leaderPool = leaderConnectionString ? new Pool({
+  connectionString: leaderConnectionString,
+  max: 1,
+  connectionTimeoutMillis: 3_000,
+  idleTimeoutMillis: 30_000,
+}) : null;
 pool?.on("error", () => { process.stderr.write("Toruni database connection interrupted.\n"); });
+leaderPool?.on("error", () => { process.stderr.write("Toruni scoring leader connection interrupted.\n"); });
 
 export async function query<T extends QueryResultRow>(text: string, values: unknown[] = []): Promise<T[]> {
   if (!pool) throw new DatabaseUnavailableError("Round service unavailable.");
@@ -49,6 +64,11 @@ export async function readCurrentRound() {
   return { serverTime: Date.now(), round: rows[0] ? roundView(rows[0]) : null };
 }
 
+export async function readScoringHeartbeat(roundId: string): Promise<number | null> {
+  const rows = await query<{ latest: Date | null }>(`SELECT max(observed_at) AS latest FROM market_observations WHERE round_id=$1`, [roundId]);
+  return rows[0]?.latest instanceof Date ? rows[0].latest.getTime() : null;
+}
+
 export async function readRoundReport(roundId: string) {
   const rounds = await query<RoundRow>(`${roundSelect} WHERE r.id = $1`, [roundId]);
   if (!rounds[0]) return null;
@@ -84,11 +104,13 @@ export async function readRoundAudit(roundId: string) {
     FROM score_samples WHERE round_id = $1 ORDER BY sampled_at, participant_id LIMIT 2000`, [roundId]);
 }
 
-export async function closeDatabase(): Promise<void> { await pool?.end(); }
+export async function closeDatabase(): Promise<void> { await Promise.all([pool?.end(), leaderPool?.end()]); }
+
+export function scoringLeaderConfigured(): boolean { return leaderPool !== null; }
 
 export async function acquireScoringLeader(): Promise<{ held: () => boolean; release: () => Promise<void> } | null> {
-  if (!pool) return null;
-  const client = await pool.connect();
+  if (!leaderPool) return null;
+  const client = await leaderPool.connect();
   try {
     const result = await client.query<{ acquired: boolean }>("SELECT pg_try_advisory_lock(hashtext('toruni-single-score-leader')) AS acquired");
     if (!result.rows[0]?.acquired) { client.release(); return null; }

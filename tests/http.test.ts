@@ -22,7 +22,10 @@ async function request(path: string, method = "GET", origin?: string) {
 test("health identifies the testnet environment and sets browser protection headers", async () => {
   const response = await request("/api/health");
   assert.equal(response.status, 200);
-  assert.equal(JSON.parse(response.body).network, "strike-v2-testnet");
+  const health = JSON.parse(response.body);
+  assert.equal(health.network, "strike-v2-testnet");
+  assert.equal(typeof health.databaseReady, "boolean");
+  assert.equal(typeof health.scoringLeaderConfigured, "boolean");
   assert.match(String(response.headers.get("content-security-policy")), /frame-ancestors 'none'/);
 });
 

@@ -4,7 +4,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/[...path].ts": { "maxDuration": 30 }
+    "api/[...path].ts": { "maxDuration": 300 }
   },
   "rewrites": [
     { "source": "/arena", "destination": "/index.html" },
