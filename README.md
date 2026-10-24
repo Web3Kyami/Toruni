@@ -58,15 +58,23 @@ Missing or stale evidence earns zero for that sample. Missed seconds are never b
 
 ### Trust and data flow
 
+#### Order authorization
+
 ```mermaid
 flowchart TD
-    Wallet[Player wallet signs Builder Connect] --> Client[Browser holds API wallet in tab memory]
-    Client -->|Player-approved offers and exact cancels| Strike[Strike V2 testnet]
-    Client -->|Round requests| API[Toruni API]
-    API --> Worker[Verifier checks market, account risk, and order status]
-    Worker -->|Independent reads| Strike
-    Worker -->|Observations, samples, and results| DB[(PostgreSQL)]
-    DB -->|Saved round data| API
+    Wallet[Player wallet] -->|Signs| Browser[API wallet stays in browser]
+    Browser -->|Orders and cancels| Strike[Strike V2 testnet]
+```
+
+#### Independent scoring
+
+```mermaid
+flowchart TD
+    Request[Round or result request] --> API[Toruni API and scorer]
+    API --> Reads[Independent Strike reads]
+    Reads --> Verify[Verify eligible quote time]
+    Verify --> Save[Save score samples]
+    Save --> DB[(PostgreSQL)]
 ```
 
 The browser keeps the Ed25519 API-wallet private key in tab memory. It sends user-approved offers and cancels for exact Toruni order IDs. The server never receives that key and never submits, cancels, or closes exchange orders. It reads Strike independently, verifies order state, and calculates the score.
