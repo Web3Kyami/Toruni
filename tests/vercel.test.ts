@@ -8,6 +8,8 @@ process.env.VERCEL_URL = "toruni-preview.vercel.app";
 const { requestHasTrustedOrigin } = await import("../server/session.ts");
 const { shouldDispatchRoundScorer } = await import("../server/scoringDispatch.ts");
 const { default: api } = await import("../api/[...path].ts");
+const { default: participantsApi } = await import("../api/participants/me.ts");
+const { default: joinApi } = await import("../api/rounds/current/join.ts");
 
 test("Vercel scoring starts after a successful join and stale live-round heartbeats", () => {
   const base = { platformIsVercel: true, method: "POST", pathname: "/api/rounds/current/join", responseStatus: 201, now: 20_000 };
@@ -39,4 +41,27 @@ test("Vercel disables process-local event streams so the client keeps its pollin
   await api({ url: "/api/events" } as IncomingMessage, response);
   assert.equal(status, 204);
   assert.equal(ended, true);
+});
+
+test("nested Vercel API entrypoints reach the shared handler", async () => {
+  const response = () => {
+    let status = 0;
+    let ended = false;
+    return {
+      value: { setHeader() {}, writeHead(code: number) { status = code; }, end() { ended = true; } } as unknown as ServerResponse,
+      status: () => status,
+      ended: () => ended,
+    };
+  };
+  const participantResponse = response();
+  await participantsApi({ url: "/api/participants/me", method: "GET", headers: {} } as IncomingMessage, participantResponse.value);
+  assert.equal(participantResponse.status(), 401);
+  assert.equal(participantResponse.ended(), true);
+
+  const joinResponse = response();
+  await joinApi({ url: "/api/rounds/current/join", method: "POST", headers: {
+    origin: "https://toruni-preview.vercel.app", host: "toruni-preview.vercel.app", "sec-fetch-site": "same-origin",
+  } } as IncomingMessage, joinResponse.value);
+  assert.equal(joinResponse.status(), 401);
+  assert.equal(joinResponse.ended(), true);
 });
