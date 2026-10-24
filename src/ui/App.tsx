@@ -22,6 +22,7 @@ import { HeroHeading } from "./HeroHeading";
 import { Leaderboard } from "./Leaderboard";
 import { readConnectedWalletAddress } from "../api/walletProvider";
 import { useWalletConnection, type WalletConnectorBridge } from "../wallet/WalletConnectionProvider";
+import type { LeaderboardMarket } from "../../shared/leaderboard";
 
 type Tab = "quotes" | "market" | "standings";
 type Dialog = "rules" | "how" | "connect" | "orders" | "risk" | "quote-review" | "requote" | null;
@@ -276,6 +277,10 @@ export function App() {
   const [tab, setTab] = useState<Tab>("quotes");
   const [selectedMarket, setSelectedMarket] = useState(() => {
     try { const stored = localStorage.getItem("toruni-market"); return isMarketSymbol(stored) ? stored : "BTC-USD"; } catch { return "BTC-USD"; }
+  });
+  const [leaderboardMarket, setLeaderboardMarket] = useState<LeaderboardMarket>(() => {
+    const value = new URLSearchParams(window.location.search).get("symbol");
+    return value === "all" || isMarketSymbol(value) ? value : "all";
   });
   const symbol = roundData.round?.symbol ?? selectedMarket;
   const symbolRef = useRef(symbol); symbolRef.current = symbol;
@@ -772,7 +777,7 @@ export function App() {
         </a>
         <span className="network-badge" aria-label="Strike V2 testnet">TESTNET</span>
         <div className="topbar-divider" />
-        <span className="topbar-context">LIQUIDITY ARENA <span className="topbar-dot">·</span> {symbol}</span>
+        <span className="topbar-context">{pathname === "/leaderboard" ? <>MAKER RANKINGS <span className="topbar-dot">·</span> {leaderboardMarket === "all" ? "ALL MARKETS" : leaderboardMarket}</> : <>LIQUIDITY ARENA <span className="topbar-dot">·</span> {symbol}</>}</span>
         <div className="topbar-spacer" />
         <button className="button button--connect" onClick={openConnect} disabled={pickerLoading} aria-label={pickerLoading ? "Opening wallet options" : liveAccount ? `Connected wallet ${shortAddress(walletAddress)}` : "Connect wallet"}>
           <Icon name="wallet" size={17} />
@@ -783,11 +788,11 @@ export function App() {
 
       <nav className="site-navigation" aria-label="Main navigation"><a href="/arena" aria-current={pathname === "/arena" ? "page" : undefined} onClick={event => {if(!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey){event.preventDefault();navigate("/arena?mode=spectate");}}}>Arena</a><a href="/leaderboard" aria-current={pathname === "/leaderboard" ? "page" : undefined} onClick={event => {if(!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey){event.preventDefault();navigate("/leaderboard");}}}>Leaderboard</a></nav>
       <main id="top" className={`page-content${showMobileDock ? " page-content--has-dock" : ""}`}>
-        {pathname === "/leaderboard" ? <Leaderboard navigate={navigate} /> : resultsRoundId ? <Results roundId={resultsRoundId} onBack={() => navigate("/")} onRules={() => setDialog("rules")}
+        {pathname === "/leaderboard" ? <Leaderboard navigate={navigate} market={leaderboardMarket} onMarketChange={setLeaderboardMarket} /> : resultsRoundId ? <Results roundId={resultsRoundId} onBack={() => navigate("/")} onRules={() => setDialog("rules")}
           myOrders={roundData.participant?.roundId === resultsRoundId ? roundData.orders : []}
           canCancel={liveAccount} cancelingOrderIds={cancelingOrderIds}
           onCancel={clientOrderId => { const order = roundData.orders.find(item => item.client_order_id === clientOrderId); if (order) void cancelObservedOrder(order); }} /> : <>
-        {pathname === "/arena" ? <section className="arena-heading"><div><span className="panel-kicker">180-SECOND CHALLENGE</span><h1>Arena</h1></div><button className="button button--ghost" onClick={() => navigate("/")}>Back to lobby</button></section> : <section className="intro-row">
+        {pathname === "/arena" ? <section className="arena-heading"><div><span className="panel-kicker">180-SECOND CHALLENGE</span><h1>{symbol} Arena</h1></div><button className="button button--ghost" onClick={() => navigate("/")}>Back to lobby</button></section> : <section className="intro-row">
           <div>
             <div className="eyebrow"><span className="eyebrow-line" />180-SECOND CHALLENGE</div>
             <HeroHeading />

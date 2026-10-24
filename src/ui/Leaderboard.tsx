@@ -1,10 +1,9 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { ArrowLeftIcon, ArrowRightIcon, TrophyIcon, ArrowUpRightIcon } from "@phosphor-icons/react";
-import { isMarketSymbol, marketSymbols } from "../../shared/markets";
+import { marketSymbols } from "../../shared/markets";
 import type { LeaderboardMarket, LeaderboardPeriod, LeaderboardSnapshot } from "../../shared/leaderboard";
 
-export function Leaderboard({ navigate }: { navigate: (path: string) => void }) {
-  const [market, setMarket] = useState<LeaderboardMarket>(() => {const value=new URLSearchParams(window.location.search).get("symbol");return isMarketSymbol(value) ? value : "all";});
+export function Leaderboard({ navigate, market, onMarketChange }: { navigate: (path: string) => void; market: LeaderboardMarket; onMarketChange: (market: LeaderboardMarket) => void }) {
   const [period, setPeriod] = useState<LeaderboardPeriod>(() => new URLSearchParams(window.location.search).get("period") === "7d" ? "7d" : "all");
   const [page, setPage] = useState(() => {const value=new URLSearchParams(window.location.search).get("page") ?? "1";return /^[1-9]\d{0,3}$/.test(value) && Number(value)<=1000 ? Number(value) : 1;});
   const [revision, setRevision] = useState(0);
@@ -44,7 +43,7 @@ export function Leaderboard({ navigate }: { navigate: (path: string) => void }) 
     <section className="panel leaderboard-panel" aria-label="Maker rankings">
       <div className="leaderboard-controls">
         <div className="leaderboard-period" role="group" aria-label="Ranking period">{([["all","All time"],["7d","7 days"]] as const).map(([value,label]) => <button key={value} className={period === value ? "is-active" : ""} aria-pressed={period === value} onClick={() => {setPeriod(value);setPage(1);}}>{label}</button>)}</div>
-        <label className="leaderboard-market">Market<select aria-label="Leaderboard market" value={market} onChange={event => {setMarket(event.target.value as LeaderboardMarket);setPage(1);}}><option value="all">All markets</option>{marketSymbols.map(symbol => <option key={symbol} value={symbol}>{symbol}</option>)}</select></label>
+        <label className="leaderboard-market">Market<select aria-label="Leaderboard market" value={market} onChange={event => {onMarketChange(event.target.value as LeaderboardMarket);setPage(1);}}><option value="all">All markets</option>{marketSymbols.map(symbol => <option key={symbol} value={symbol}>{symbol}</option>)}</select></label>
       </div>
       {error ? <div className="leaderboard-empty" role="status"><h2>Rankings unavailable</h2><button className="button button--ghost" onClick={() => setRevision(value=>value+1)}>Try again</button></div>
         : !current && loading ? <div className="leaderboard-loading" aria-label="Loading leaderboard" role="status"><span className="sr-only">Loading leaderboard</span>{[1,2,3,4].map(row=><div key={row}/>)}</div>
