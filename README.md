@@ -63,7 +63,7 @@ Missing or stale evidence earns zero for that sample. Missed seconds are never b
 ```mermaid
 flowchart TD
     Wallet[Player wallet] -->|Signs| Browser[API wallet stays in browser]
-    Browser -->|Orders and cancels| Strike[Strike V2 testnet]
+    Browser -->|Orders and cancels| Strike[Strike testnet]
 ```
 
 #### Independent scoring
