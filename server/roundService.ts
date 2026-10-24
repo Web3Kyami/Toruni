@@ -67,6 +67,11 @@ export async function enrollParticipant(client: PoolClient, sessionHash: string,
 export async function issueQuoteIntent(client: PoolClient, sessionHash: string, side: StrikeSide, now: number,
   risk?: { availableBalance: string; currentAbsoluteExposure: string; requestedNotional: string; maximumAccountExposure: string; price: string; size: string }) {
   if (side !== "buy" && side !== "sell") throw new RoundGuardError("Choose bid or ask.", 400);
+  // Match the scorer's round-first lock order before locking a participant or its quote intents.
+  const lockedRound = await client.query(`SELECT r.id FROM rounds r JOIN participants p ON p.round_id=r.id
+    JOIN app_sessions s ON s.session_hash=p.session_hash
+    WHERE p.session_hash=$1 AND r.status='active' AND s.expires_at>$2 FOR UPDATE OF r`, [sessionHash, new Date(now)]);
+  if (!lockedRound.rowCount) throw new RoundGuardError("Join an active round before requesting an order intent.");
   const rows = await client.query(`SELECT p.id AS participant_id,p.round_id,r.market,r.starts_at,r.ends_at
     FROM participants p JOIN rounds r ON r.id = p.round_id JOIN app_sessions s ON s.session_hash=p.session_hash
     WHERE p.session_hash = $1 AND r.status = 'active' AND s.expires_at > $2 FOR UPDATE OF p`, [sessionHash, new Date(now)]);
@@ -135,6 +140,11 @@ export async function issueQuoteIntent(client: PoolClient, sessionHash: string, 
 
 export async function recordOrderObservation(client: PoolClient, quote: VerifiedQuote): Promise<void> {
   if (quote.provenance !== "strike-public-order-read") throw new RoundGuardError("Independent Strike order evidence is required.");
+  // The scorer locks rounds before writing samples that reference quote/participant rows.
+  // Lock the same round first here to avoid a round ↔ participant/intent deadlock.
+  const lockedRound = await client.query(`SELECT r.id FROM rounds r JOIN quote_intents qi ON qi.round_id=r.id
+    WHERE qi.client_order_id=$1 FOR UPDATE OF r`, [quote.clientOrderId]);
+  if (!lockedRound.rowCount) throw new RoundGuardError("Order intent no longer exists.");
   const found = await client.query(`SELECT qi.*, p.claimed_account_id, p.account_id, r.market FROM quote_intents qi
     JOIN participants p ON p.id = qi.participant_id AND p.round_id = qi.round_id
     JOIN rounds r ON r.id = qi.round_id WHERE qi.client_order_id = $1 FOR UPDATE OF qi,p`, [quote.clientOrderId]);

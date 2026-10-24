@@ -41,7 +41,7 @@ The service serves `dist/` and the API on port 4174 by default. Configure `APP_O
 
 ## Architecture
 
-The Vercel deployment serves the interface and HTTP API through `api/[...path].ts`. Configure the builder values and both server-only database URLs in the project environment. App queries use `DATABASE_URL`; the database-held scoring leader uses `DATABASE_URL_UNPOOLED` so a transaction pooler cannot break its session lock. Sessions use the deployment's `VERCEL_URL` as their trusted origin unless `APP_ORIGIN` is configured for a custom domain. Client routes support direct navigation and refresh.
+The Vercel deployment serves the interface and HTTP API through `api/[...path].ts`. The existing Toruni production project already has its server-only database URLs configured; `/api/health` confirms PostgreSQL and the scoring lock connection are reachable, so no dashboard variable setup is needed for this deployment. For a separate deployment, configure the builder values and both server-only database URLs. App queries use `DATABASE_URL`; the database-held scoring leader uses `DATABASE_URL_UNPOOLED` so a transaction pooler cannot break its session lock. Sessions use the deployment's `VERCEL_URL` as their trusted origin unless `APP_ORIGIN` is configured for a custom domain. Client routes support direct navigation and refresh.
 
 After a successful join, Vercel keeps a bounded scorer running in the background for that round. It samples at one-second intervals, and current-round polling can restart it if its market-data heartbeat goes stale. The round and settlement window fit within the configured 300-second function limit. This is continuous scoring during a round, not an always-on process between rounds; a standalone Node host runs the worker continuously.
 
