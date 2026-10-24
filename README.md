@@ -1,71 +1,163 @@
 # Toruni
 
-A 180-second market-making challenge on Strike Finance V2 testnet. Hold competitive post-only bids and asks, then inspect the independently observed evidence behind each score.
+**Anyone can bet on the market. Can you make the market?**
+
+Toruni turns liquidity making into a three-minute challenge on Strike Finance V2 testnet. Quote a BTC-USD bid and ask, keep them competitive, and earn points only when the server can verify the exchange evidence behind them.
+
+[Open the live arena](https://toruni.vercel.app/) · [See how scoring works](#scoring) · [Run Toruni locally](#run-locally)
+
+![Toruni lobby with the live BTC-USD market, bid and ask controls, and round standings](docs/images/toruni-lobby.png)
+
+*The lobby shows live market data and a waiting-round state. Prices and round status change with Strike testnet activity.*
+
+| Challenge | 180 seconds |
+| --- | --- |
+| Market | BTC-USD |
+| Exchange | Strike Finance V2 testnet |
+| Result | Server-verified score with a per-second audit trail |
+| Trading authority | The player’s browser, after wallet authorization |
+
+## The challenge
+
+The first eligible maker starts a round. Players join, review their risk limits, then submit a bid and an ask as separate post-only limit offers. Offers stay open until canceled, including after the round ends. A fill can create a position, so canceling an offer does not close that position.
+
+### Player journey
+
+```mermaid
+flowchart LR
+    A[Explore the live BTC-USD arena] --> B{Ready to take part?}
+    B -->|Watch| C[Follow the market and round]
+    B -->|Join| D[Connect wallet and authorize Toruni]
+    D --> E[Check Strike account and risk limits]
+    E --> F[Join a round]
+    F --> G[Review and place a bid and ask]
+    G --> H[Strike receives the player-approved offers]
+    H --> I[Server independently verifies order status]
+    I --> J[Eligible evidence earns points each second]
+    J --> K{180 seconds elapsed?}
+    K -->|No| G
+    K -->|Yes| L[Player cancels Toruni offers in the app]
+    L --> M[Server verifies each final order state]
+    M --> N[Review result and score history]
+```
+
+### What a judge can try
+
+1. Open the [live arena](https://toruni.vercel.app/) and inspect the current BTC-USD mark, order book, and round state. The lobby can be explored without a wallet.
+2. To participate, connect an Ethereum-compatible browser wallet and approve the Builder Connect message. Toruni creates an Ed25519 API wallet in the browser; the private key stays in tab memory.
+3. Use a Strike V2 testnet account with trading collateral already credited. Testnet faucet tokens held in a wallet are not the same as collateral credited to a Strike account.
+4. Check the account and displayed risk limits, join the round, then review each bid or ask before placing it.
+5. Follow order verification and scoring in the arena. When the round ends, cancel Toruni offers individually and inspect their verified final states and the score history.
+
+If an offer fills, the resulting position remains the player’s responsibility. Toruni shows position risk and never closes positions automatically.
+
+## Scoring
+
+Each eligible bid and ask receives a quality value from `0` to `1`. Quality is `1` at the market mark and decreases linearly to `0` at 50 basis points away. Let `B` be bid quality and `A` be ask quality:
+
+```text
+points per minute = 25 × B + 25 × A + 50 × min(B, A)
+```
+
+The two-sided bonus uses the weaker side, so keeping both offers competitive matters. A single side can earn its side points, but cannot earn the two-sided bonus.
+
+| Evidence Toruni checks | Scoring effect |
+| --- | --- |
+| Strike independently reports the exact offer as open for the bound account, market, and side | Unverified or terminal offers earn no credit |
+| Offer is a post-only limit order that stays open until canceled | Other order types are not eligible |
+| Current market and order observations are fresh, and the offer stays eligible for a five-second dwell | Stale evidence, missing samples, or interrupted dwell earn zero for that sample |
+| Remaining offer value meets the current Strike minimum notional and the account remains within its risk limits | Undersized or unsafe offers earn no credit |
+
+Toruni reads market constraints from Strike’s market API. It does not trust the browser’s reported order status, price, or score. The server samples once per second, uses exact decimal arithmetic, stores the observations and score samples in PostgreSQL, and never backfills missed intervals. The results page exposes the saved order states and score history for review.
+
+## How the system works
+
+```mermaid
+flowchart LR
+    subgraph Browser[Player browser]
+        Wallet[EVM wallet signs Builder Connect]
+        Client[Toruni client and in-memory Ed25519 API wallet]
+    end
+
+    subgraph Vercel[Toruni Vercel app]
+        API[HTTP API and session]
+        Worker[Round verifier and scorer]
+    end
+
+    Strike[Strike V2 testnet API]
+    DB[(PostgreSQL)]
+
+    Wallet -->|Authorize builder registration| Client
+    Client -->|Player-approved post-only offers and exact-ID cancels| Strike
+    Client -->|Session, join, quote intent, result reads| API
+    API -->|Independent market, account, and order reads| Strike
+    API -->|Start or recover round worker| Worker
+    Worker -->|Fresh market, risk, and exact order reads| Strike
+    Worker -->|Observations, score samples, and results| DB
+    API -->|Persisted round and result data| Client
+```
+
+The exchange write path stays in the player’s browser. Toruni’s server never receives the API-wallet private key and never submits, cancels, or closes exchange orders. It independently reads Strike to verify order state and calculate the score.
+
+Both client and server pin exchange traffic to `https://api-v2-testnet.strikefinance.org`. Mainnet is not a configurable target.
+
+On Vercel, a bounded background worker starts after a successful round join and can be restarted when the round’s scoring heartbeat goes stale. It samples throughout the round and settlement window, with PostgreSQL electing one scoring leader. It is continuous during a round, not an always-running process between rounds. A persistent Node host can run the same scorer continuously.
 
 ## Run locally
 
-Use Node.js 22.18 or newer and npm. Wallet authorization requires an Ethereum-compatible browser wallet.
+Use Node.js 22.18 or newer and npm.
 
 ```sh
 npm install
 cp .env.example .env.local
 ```
 
-Set these values in `.env.local`:
+Set the required values in `.env.local`:
 
 | Variable | Purpose |
 | --- | --- |
-| `VITE_BUILDER_CODE` | Public Strike builder code registered on V2 testnet |
-| `VITE_BUILDER_FEE_BPS` | `0` for this build |
+| `VITE_BUILDER_CODE` | Public builder code registered for Strike V2 testnet |
+| `VITE_BUILDER_FEE_BPS` | Builder fee setting; `.env.example` uses `0` |
 | `DATABASE_URL` | Server-only PostgreSQL connection for app queries; a pooler URL is supported |
-| `DATABASE_URL_UNPOOLED` | Server-only direct PostgreSQL connection for the scoring leader lock |
+| `DATABASE_URL_UNPOOLED` | Server-only direct connection used for the scoring leader lock |
 | `APP_ORIGIN` | Exact browser origin, normally `http://localhost:5173` |
-| `TORUNI_MAX_QUOTE_NOTIONAL` | Owner-approved maximum value for one resting quote, in USD |
-| `TORUNI_MAX_ACCOUNT_EXPOSURE` | Owner-approved gross limit for positions and Toruni resting quotes, in USD; must cover two maximum quotes |
+| `TORUNI_MAX_QUOTE_NOTIONAL` | Maximum value allowed for one resting quote, in USD |
+| `TORUNI_MAX_ACCOUNT_EXPOSURE` | Maximum gross exposure for positions and Toruni quotes, in USD; must cover two maximum quotes |
+
+Keep both database URLs server-only. Do not prefix them with `VITE_`, which would expose them to the browser. Risk limits must be explicitly configured before a round accepts participants.
 
 ```sh
 npm run migrate
 npm run dev
 ```
 
-Vite serves the client and API together. For a stable local preview without hot reload, first run `npm run build`, then `npm run dev -- --mode wallet-preview --port 5173`. API-wallet keys live only in tab memory; refreshing or closing the tab loses the local signer.
+Vite serves the interface and API together. The API-wallet private key is held in tab memory and is lost when that tab is refreshed or closed.
 
-For a built Node service:
+To build and run the standalone Node service:
 
 ```sh
 npm run build
 npm run start:server
 ```
 
-The service serves `dist/` and the API on port 4174 by default. Configure `APP_ORIGIN` for its actual browser URL. Run migrations before starting a new schema version.
+The service serves `dist/` and the API on port 4174 by default. Configure `APP_ORIGIN` for the browser URL and run migrations before starting a new schema version.
 
-## Architecture
+## Deployment
 
-The Vercel deployment serves the interface and HTTP API through `api/[...path].ts`. The existing Toruni production project already has its server-only database URLs configured; `/api/health` confirms PostgreSQL and the scoring lock connection are reachable, so no dashboard variable setup is needed for this deployment. For a separate deployment, configure the builder values and both server-only database URLs. App queries use `DATABASE_URL`; the database-held scoring leader uses `DATABASE_URL_UNPOOLED` so a transaction pooler cannot break its session lock. Sessions use the deployment's `VERCEL_URL` as their trusted origin unless `APP_ORIGIN` is configured for a custom domain. Client routes support direct navigation and refresh.
+The public app is [toruni.vercel.app](https://toruni.vercel.app/). Vercel builds with `npm run build`, serves `dist/`, and routes API requests through the handlers in `api/`. The Vercel function limit is 300 seconds, which accommodates a round and its settlement window.
 
-After a successful join, Vercel keeps a bounded scorer running in the background for that round. It samples at one-second intervals, and current-round polling can restart it if its market-data heartbeat goes stale. The round and settlement window fit within the configured 300-second function limit. This is continuous scoring during a round, not an always-on process between rounds; a standalone Node host runs the worker continuously.
+For a separate Vercel project, configure the variables listed above in the appropriate environments. The two database URLs are required for persisted rounds and scoring; the direct URL keeps the database leader lock on one PostgreSQL session. Session cookies trust Vercel’s deployment URL unless `APP_ORIGIN` is set for a custom domain. See [`vercel.json`](vercel.json) for the build, API limits, and client-side routes.
 
-The scoring worker also runs through `npm run start:server` on a persistent Node host sharing the same database. Vercel clients poll persisted observations; the persistent Node service retains its event stream. The `/api/health` response reports whether PostgreSQL and the direct scoring lock connection are configured and reachable.
+## Code map
 
-- `src/`: React interface, Builder Connect, browser-only Ed25519 signing, and testnet order adapters.
-- `src/api/deposits.ts`: Sepolia USDC quote, unsigned-transaction validation, and submission confirmation adapters. Preparation checks the connected network and deployed contracts, binds calldata to the account and quote, and permits only an exact-amount approval. It never broadcasts a transaction; a caller must obtain wallet approval, track its receipt, and separately verify credited Strike collateral.
-- `server/`: secure sessions, independent Strike reads, round lifecycle, a database-held scoring leader, server-sent updates, and report APIs.
-- `shared/`: typed contracts, exact decimal validation, fixed-point scoring, and deterministic ledger replay.
-- `sql/`: ordered PostgreSQL migrations with checksum verification.
-
-Only `api-v2-testnet.strikefinance.org` accepts authenticated requests. There is no configurable mainnet endpoint. Builder Connect starts after an explicit user action. The browser keeps the API-wallet key in tab memory and submits user-approved post-only GTC orders and per-order cancellations. The server never receives that key or submits, cancels, or closes exchange orders. It verifies order status through independent Strike reads and calculates scores. The authenticated userstream prompts quick UI refreshes; its events do not establish order status or score.
-
-## Verified testnet status
-
-A genuine app-driven 180-second round submitted post-only BTC-USD buy and sell offers, then replaced the buy only after Strike independently confirmed the original was closed. Strike verified the three offers as open before their terminal states. The server stored 103 score observations whose exact deltas replay to 11.290605414897, displayed as 11.29, including 24 two-sided seconds. The replacement buy filled 0.00021 BTC; all offers ended canceled. A separate guarded reduce-only testnet order closed the resulting position, and fresh Strike reads verified the account was flat with no open offers. Toruni never closes positions automatically.
-
-Round entry stays closed until both risk limits are set. At 1x, the app uses twice the per-quote cap as a baseline reserve estimate for both offers. Strike fees and positions created by fills may require more; the actual available balance and risk are rechecked before each order. These limits have no default because the blueprint does not approve numeric values. A successful create response is not proof that an order is open. Canceling an order does not close any position created by a fill.
-
-## Scoring
-
-`toruni-observed-two-sided-v0.1` awards a per-minute rate of `25B + 25A + 50 min(B,A)`, where each side’s quality decreases linearly from 1 at the mark to 0 at 50 basis points. A quote must be independently observed open, post-only, GTC, sufficiently sized, and continuously eligible through a five-second dwell period.
-
-The server samples once per second using exact scaled integers. Stale or missing order, market, or risk evidence earns no credit. Missed intervals are never backfilled. PostgreSQL stores the observations, score policy, samples, and finalized totals; the browser displays those totals.
+| Path | Responsibility |
+| --- | --- |
+| `src/` | Interface, wallet connection, Builder Connect, and browser-side Strike order requests |
+| `server/` | Sessions, API, independent Strike reads, round lifecycle, verifier, and scorer |
+| `shared/` | Typed contracts, exact decimal checks, scoring policy, and deterministic ledger replay |
+| `sql/` | Ordered PostgreSQL migrations |
+| `api/` | Vercel HTTP entry points |
+| `tests/` | Scoring, validation, lifecycle, API, and worker regression tests |
 
 ## Checks
 
@@ -75,10 +167,10 @@ npm test
 npm run build
 ```
 
-`npm test` uses isolated fixtures and never submits trades. The optional `integration-check` Vite mode exercises PostgreSQL persistence in a rolled-back transaction. The optional `visual-review` mode captures real screens through a locally installed Chromium; its executable path is configured in `scripts/visual-review.mjs`.
+The automated tests use isolated test data and do not submit trades. A passing test suite or local build does not replace a genuine Strike testnet round.
 
-## Attribution
+## Attribution and license
 
-Strike API behavior and signing conventions follow the [Strike Builder Reference](https://github.com/strike-finance/strike-builder-reference) and [official Strike API documentation](https://docs.strikefinance.org/api). No Strike app code, icons, or branding assets are copied. MIT licensed.
+Strike request and signing behavior follows the [Strike Builder Reference](https://github.com/strike-finance/strike-builder-reference) and [official Strike API documentation](https://docs.strikefinance.org/api). Toruni does not copy Strike application code, icons, or branding assets. The project is MIT licensed.
 
-Typography uses bundled Plus Jakarta Sans from Fontsource 5.3.0, licensed under the SIL Open Font License. The license is included at `src/assets/plus-jakarta-sans-LICENSE.txt`.
+The interface uses bundled Plus Jakarta Sans from Fontsource 5.3.0 under the SIL Open Font License. See [`src/assets/plus-jakarta-sans-LICENSE.txt`](src/assets/plus-jakarta-sans-LICENSE.txt).
