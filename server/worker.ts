@@ -31,16 +31,19 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
   let cycleTask: Promise<void> | null = null;
   let collectionTask: Promise<void> | null = null;
   let orderTask: Promise<void> | null = null;
+  let sampleTask: Promise<void> | null = null;
+  let collectionTimer: ReturnType<typeof setTimeout> | null = null;
+  let orderTimer: ReturnType<typeof setTimeout> | null = null;
+  let sampleTimer: ReturnType<typeof setTimeout> | null = null;
   let engineRules: StrikeMarketRules | null = null;
   let lastRulesRead = 0;
-  let lastOrderPoll = 0;
   let lastRiskPoll = 0;
   let lastMarkPoll = 0;
   let activeRoundId: string | null = null;
+  let activeRound: { id: string; status: RoundStatus; startsAt: number; endsAt: number } | null = null;
   let lastSampleSlot: number | null = null;
   let lastPublished = 0;
   let lastDiagnosticAt = 0;
-  let collectionRunning = false;
   let readySettled = false;
   let resolveReady!: (acquired: boolean) => void;
   const ready = new Promise<boolean>(resolve => { resolveReady = resolve; });
@@ -48,6 +51,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
     if (!readySettled) { readySettled = true; resolveReady(acquired); }
   };
   const mayWrite = () => !stopped && Boolean(leader?.held());
+  const mayWriteRound = (roundId: string) => mayWrite() && activeRoundId === roundId;
 
   const resetContinuity = async () => {
     await query(`UPDATE quote_intents SET first_open_observed_at=NULL,last_verified_at=NULL,
@@ -65,9 +69,9 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
           clientOrderId: intent.client_order_id as string, symbol: intent.market as string, side: intent.side as "buy" | "sell",
           firstOpenObservedAt: intent.first_open_observed_at instanceof Date ? intent.first_open_observed_at.getTime() : null,
           lastVerifiedAt: intent.last_verified_at instanceof Date ? intent.last_verified_at.getTime() : undefined });
-        if (!mayWrite()) return;
+        if (!mayWriteRound(roundId)) return;
         if (result.kind === "observed") {
-          await transaction(client => mayWrite() ? recordOrderObservation(client, result.quote) : Promise.resolve());
+          await transaction(client => mayWriteRound(roundId) ? recordOrderObservation(client, result.quote) : Promise.resolve());
           return;
         }
         const failures = Number(intent.verification_failures) + 1;
@@ -78,7 +82,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
           [code, failures, new Date(), new Date(Date.now() + delay), intent.id]);
       } catch (error) {
         // A transient failure for one quote must not prevent its paired quote from being observed.
-        if (!mayWrite()) return;
+        if (!mayWriteRound(roundId)) return;
         const failures = Number(intent.verification_failures) + 1;
         await query(`UPDATE quote_intents SET status='unknown',verification_error=$1,verification_failures=$2,
           last_checked_at=$3,next_verify_at=$4,first_open_observed_at=NULL,last_verified_at=NULL WHERE id=$5 AND status<>'terminal'`,
@@ -87,9 +91,6 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
     }));
   };
   const collect = async (roundId: string, now: number) => {
-    if (collectionRunning) return;
-    collectionRunning = true;
-    try {
       const jobs: Promise<unknown>[] = [];
       if (now - lastRulesRead >= 15_000 || !engineRules) {
         lastRulesRead = now;
@@ -99,7 +100,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
         lastMarkPoll = now;
         jobs.push((async () => {
           const mark = await readFreshMark();
-          if (mark && mayWrite()) await query(`INSERT INTO market_observations (round_id,observed_at,exchange_event_at,mark,source,data_status)
+          if (mark && mayWriteRound(roundId)) await query(`INSERT INTO market_observations (round_id,observed_at,exchange_event_at,mark,source,data_status)
             VALUES ($1,$2,$3,$4,'strike-v2-testnet','healthy')`, [roundId, new Date(), new Date(mark.observedAt), mark.markPrice]);
         })());
       }
@@ -126,7 +127,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
               const scale = Math.max(exposure.scale, notional.scale);
               exposure = { coefficient: exposure.coefficient * 10n ** BigInt(scale - exposure.scale) + notional.coefficient * 10n ** BigInt(scale - notional.scale), scale };
             }
-            if (supported && mayWrite()) await query(`INSERT INTO risk_observations (round_id,participant_id,observed_at,absolute_exposure,available_collateral,source,symbol_leverage)
+            if (supported && mayWriteRound(roundId)) await query(`INSERT INTO risk_observations (round_id,participant_id,observed_at,absolute_exposure,available_collateral,source,symbol_leverage)
               VALUES ($1,$2,$3,$4,$5,'strike-independent-read',1)`, [roundId, participant.id, new Date(), formatDecimal(exposure), account.available_balance]);
             } catch { /* Missing risk evidence pauses this participant without starving other accounts. */ }
           }
@@ -138,7 +139,93 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
         lastDiagnosticAt = Date.now();
         process.stderr.write(`Toruni scoring collection paused (${failureLabel(failure.reason)}).\n`);
       }
-    } finally { collectionRunning = false; }
+  };
+
+  const scheduleCollection = (delayMs = 250) => {
+    if (stopped || collectionTimer || collectionTask || !activeRoundId || !mayWrite()) return;
+    collectionTimer = setTimeout(() => {
+      collectionTimer = null;
+      const roundId = activeRoundId;
+      if (!roundId || !mayWriteRound(roundId)) return;
+      collectionTask = collect(roundId, Date.now())
+        .catch(error => {
+          if (Date.now() - lastDiagnosticAt >= 10_000) {
+            lastDiagnosticAt = Date.now();
+            process.stderr.write(`Toruni scoring collection stopped (${failureLabel(error)}).\n`);
+          }
+        })
+        .finally(() => {
+          collectionTask = null;
+          if (activeRoundId === roundId) scheduleCollection(250);
+        });
+    }, Math.max(0, delayMs));
+  };
+
+  const scheduleOrderPoll = (delayMs = 0) => {
+    if (stopped || orderTimer || orderTask || !activeRoundId || !mayWrite()) return;
+    orderTimer = setTimeout(() => {
+      orderTimer = null;
+      const roundId = activeRoundId;
+      if (!roundId || !mayWriteRound(roundId)) return;
+      const startedAt = Date.now();
+      orderTask = collectOrders(roundId, startedAt)
+        .catch(error => {
+          if (Date.now() - lastDiagnosticAt >= 10_000) {
+            lastDiagnosticAt = Date.now();
+            process.stderr.write(`Toruni order verification paused (${failureLabel(error)}).\n`);
+          }
+        })
+        .finally(() => {
+          orderTask = null;
+          if (activeRoundId === roundId) scheduleOrderPoll(Math.max(0, 2_000 - (Date.now() - startedAt)));
+        });
+    }, Math.max(0, delayMs));
+  };
+
+  const scheduleSample = (delayMs?: number) => {
+    const round = activeRound;
+    if (stopped || sampleTimer || sampleTask || !round || round.status !== "active" || !mayWriteRound(round.id)) return;
+    const now = Date.now();
+    const latestSlot = round.startsAt + Math.floor((now - round.startsAt) / 1_000) * 1_000;
+    const delay = delayMs ?? (latestSlot > round.startsAt && latestSlot <= round.endsAt && latestSlot !== lastSampleSlot
+      ? 0 : Math.max(1, Math.min(100, round.startsAt + Math.max(1, Math.floor((now - round.startsAt) / 1_000) + 1) * 1_000 - now)));
+    sampleTimer = setTimeout(() => {
+      sampleTimer = null;
+      const currentRound = activeRound;
+      const sampledNow = Date.now();
+      if (!currentRound || currentRound.status !== "active" || !mayWriteRound(currentRound.id)) return;
+      const sampledAt = Math.min(currentRound.endsAt,
+        currentRound.startsAt + Math.floor((sampledNow - currentRound.startsAt) / 1_000) * 1_000);
+      if (sampledAt <= currentRound.startsAt || sampledAt > currentRound.endsAt || sampledAt === lastSampleSlot) {
+        scheduleSample();
+        return;
+      }
+      lastSampleSlot = sampledAt;
+      sampleTask = (async () => {
+        const participants = await query("SELECT id FROM participants WHERE round_id=$1 AND verification_state='verified' LIMIT 8", [currentRound.id]);
+        const sampleTime = Date.now();
+        const minimum = engineRules && sampleTime >= engineRules.observedAt && sampleTime - engineRules.observedAt <= 30_000
+          && engineRules.status === "trading" && !engineRules.reduceOnly ? engineRules.minimumNotional : null;
+        for (const participant of participants) {
+          if (!mayWriteRound(currentRound.id)) break;
+          await transaction(async client => {
+            if (mayWriteRound(currentRound.id)) {
+              await persistScoreTick(client, currentRound.id, participant.id as string, sampledAt, minimum);
+            }
+          });
+        }
+      })()
+        .catch(error => {
+          if (Date.now() - lastDiagnosticAt >= 10_000) {
+            lastDiagnosticAt = Date.now();
+            process.stderr.write(`Toruni score sampler paused (${failureLabel(error)}).\n`);
+          }
+        })
+        .finally(() => {
+          sampleTask = null;
+          scheduleSample();
+        });
+    }, Math.max(0, delay));
   };
 
   const cycle = async () => {
@@ -158,64 +245,49 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
         ? await query(`SELECT * FROM rounds WHERE id=$1 AND status IN ('lobby','active','settling','review_required') LIMIT 1`, [options.roundId])
         : await query(`SELECT * FROM rounds WHERE status IN ('lobby','active','settling','review_required') LIMIT 1`);
       const round = rounds[0];
-      if (!round) { activeRoundId = null; return; }
-      if (activeRoundId !== round.id) { activeRoundId = round.id as string; engineRules = null; lastSampleSlot = null; }
+      if (!round) {
+        activeRoundId = null;
+        activeRound = null;
+        if (collectionTimer) clearTimeout(collectionTimer);
+        if (orderTimer) clearTimeout(orderTimer);
+        if (sampleTimer) clearTimeout(sampleTimer);
+        collectionTimer = null;
+        orderTimer = null;
+        sampleTimer = null;
+        return;
+      }
+      const roundId = round.id as string;
+      if (activeRoundId !== roundId) {
+        activeRoundId = roundId;
+        engineRules = null;
+        lastSampleSlot = null;
+        lastRulesRead = 0;
+        lastRiskPoll = 0;
+        lastMarkPoll = 0;
+      }
       const now = Date.now();
-      stage = "market and order collection";
-      if (!collectionTask) {
-        collectionTask = collect(round.id as string, now)
-          .catch(error => {
-            if (Date.now() - lastDiagnosticAt >= 10_000) {
-              lastDiagnosticAt = Date.now();
-              process.stderr.write(`Toruni scoring collection stopped (${failureLabel(error)}).\n`);
-            }
-          })
-          .finally(() => { collectionTask = null; });
-      }
-      if (!orderTask && now - lastOrderPoll >= 2_000) {
-        lastOrderPoll = now;
-        orderTask = collectOrders(round.id as string, now)
-          .catch(error => {
-            if (Date.now() - lastDiagnosticAt >= 10_000) {
-              lastDiagnosticAt = Date.now();
-              process.stderr.write(`Toruni order verification paused (${failureLabel(error)}).\n`);
-            }
-          })
-          .finally(() => { orderTask = null; });
-      }
+      activeRound = { id: roundId, status: round.status as RoundStatus,
+        startsAt: (round.starts_at as Date).getTime(), endsAt: (round.ends_at as Date).getTime() };
+      scheduleCollection(0);
+      scheduleOrderPoll(0);
+      if (activeRound.status === "active") scheduleSample();
       stage = "pending-order lookup";
-      const pending = await query<{ count: string }>("SELECT count(*) FROM quote_intents WHERE round_id=$1 AND status<>'terminal'", [round.id]);
+      const pending = await query<{ count: string }>("SELECT count(*) FROM quote_intents WHERE round_id=$1 AND status<>'terminal'", [roundId]);
       stage = "round transition";
       const next = advanceRound({ status: round.status as RoundStatus, startsAt: (round.starts_at as Date).getTime(),
         endsAt: (round.ends_at as Date).getTime(), settlementDeadline: (round.settlement_deadline as Date).getTime() }, now, pending[0]?.count === "0");
       if (!mayWrite()) return;
-      if (round.status === "active" && now < (round.ends_at as Date).getTime() + 1000 && leader.held()) {
-        stage = "score sampling";
-        const startsAt = (round.starts_at as Date).getTime();
-        const sampledAt = Math.min((round.ends_at as Date).getTime(), startsAt + Math.floor((now - startsAt) / 1000) * 1000);
-        if (sampledAt !== lastSampleSlot) {
-        lastSampleSlot = sampledAt;
-        const participants = await query("SELECT id FROM participants WHERE round_id=$1 AND verification_state='verified' LIMIT 8", [round.id]);
-        const minimum = engineRules && now >= engineRules.observedAt && now - engineRules.observedAt <= 30_000
-          && engineRules.status === "trading" && !engineRules.reduceOnly ? engineRules.minimumNotional : null;
-        for (const participant of participants) {
-          if (!mayWrite()) break;
-          await transaction(async client => {
-            if (mayWrite()) await persistScoreTick(client, round.id as string, participant.id as string, sampledAt, minimum);
-          });
-        }
-        }
-      }
-      if (next.changed) await query("UPDATE rounds SET status=$1 WHERE id=$2", [next.status, round.id]);
+      if (next.changed) await query("UPDATE rounds SET status=$1 WHERE id=$2", [next.status, roundId]);
+      if (activeRoundId === roundId && activeRound) activeRound.status = next.status;
       if (!mayWrite()) return;
       if (["completed", "review_required"].includes(next.status)) {
         stage = "result finalization";
-        await transaction(client => mayWrite() ? finalizeRoundResults(client, round.id as string, now) : Promise.resolve());
+        await transaction(client => mayWrite() ? finalizeRoundResults(client, roundId, now) : Promise.resolve());
       }
       if (now - lastPublished >= 1000 || next.changed) {
         lastPublished = now;
         stage = "round publication";
-        publishEvent("round", { ...await readCurrentRound(), completedRoundId: next.status === "completed" ? round.id : null });
+        publishEvent("round", { ...await readCurrentRound(), completedRoundId: next.status === "completed" ? roundId : null });
       }
     } catch (error) {
       markReady(false);
@@ -234,8 +306,11 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
     if (stopped) return;
     stopped = true;
     if (timer) clearTimeout(timer);
+    if (collectionTimer) clearTimeout(collectionTimer);
+    if (orderTimer) clearTimeout(orderTimer);
+    if (sampleTimer) clearTimeout(sampleTimer);
     if (!readySettled) markReady(false);
-    const drained = await drainWorkerTasks([cycleTask, collectionTask, orderTask], WORKER_STOP_DRAIN_MS);
+    const drained = await drainWorkerTasks([cycleTask, collectionTask, orderTask, sampleTask], WORKER_STOP_DRAIN_MS);
     if (!drained) process.stderr.write("Toruni scorer released its leader after the shutdown drain limit.\n");
     const currentLeader = leader;
     leader = null;
