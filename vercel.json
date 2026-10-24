@@ -8,6 +8,7 @@
     "api/rounds/**/*.ts": { "maxDuration": 300 }
   },
   "rewrites": [
+    { "source": "/leaderboard", "destination": "/index.html" },
     { "source": "/arena", "destination": "/index.html" },
     { "source": "/results/:roundId", "destination": "/index.html" }
   ]

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handle } from "../server/app.ts";
+import { leaderboardFilters } from "../server/leaderboard.ts";
 
 async function request(path: string, method = "GET", origin?: string) {
   let status = 0;
@@ -36,6 +37,15 @@ test("session creation rejects absent or foreign origins before database access"
   assert.equal((await request("/api/participants/me")).status, 401);
   assert.equal((await request("/api/rounds/current/join", "POST", "http://localhost:5173")).status, 401);
   assert.equal((await request("/api/quote-intents", "POST", "http://localhost:5173")).status, 401);
+});
+
+test("leaderboard filters accept supported values and reject malformed input", async () => {
+  assert.deepEqual(leaderboardFilters(new URL("https://toruni.test/api/leaderboard")), { market: "all", period: "all", page: 1 });
+  assert.deepEqual(leaderboardFilters(new URL("https://toruni.test/api/leaderboard?symbol=ETH-USD&period=7d&page=12")), { market: "ETH-USD", period: "7d", page: 12 });
+  for (const query of ["symbol=UNKNOWN", "period=30d", "page=0", "page=-1", "page=1001", "page=1.5"]) {
+    assert.throws(() => leaderboardFilters(new URL(`https://toruni.test/api/leaderboard?${query}`)), /valid leaderboard filter/);
+  }
+  assert.equal((await request("/api/leaderboard?symbol=UNKNOWN")).status, 400);
 });
 
 test("static serving never exposes local environment, private blueprint or source paths", async () => {

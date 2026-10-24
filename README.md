@@ -6,7 +6,7 @@ Choose BTC-USD, ETH-USD or SOL-USD before starting a challenge. Each round uses 
 
 The arena includes a price trend drawn from Strike’s candle history and recent verified offers from all makers. The activity feed keeps up to 40 offers, with four visible at a time.
 
-[Open the arena](https://toruni.vercel.app/) · [How a round works](#a-round) · [Run locally](#run-locally)
+[Open the arena](https://toruni.vercel.app/) · [Leaderboard](https://toruni.vercel.app/leaderboard) · [How a round works](#a-round) · [Run locally](#run-locally)
 
 ![Toruni lobby with the live BTC-USD market, bid and ask controls, and round standings](docs/images/toruni-lobby.png)
 
@@ -27,6 +27,12 @@ flowchart TD
 ```
 
 A quote earns points only after the server confirms that the exact order is open and competitive. Requests that Strike accepts are not enough by themselves. Missing or stale market, account, or order evidence earns zero for that sample.
+
+## Leaderboard
+
+The [leaderboard](https://toruni.vercel.app/leaderboard) ranks makers by their best verified completed round. Filter by market or the last seven days, then open a ranked round to inspect its result and score history. Each account appears once; playing more rounds does not add to its ranking score. Makers have stable anonymous IDs rather than published wallet addresses.
+
+Only finalized results from completed rounds, verified accounts and the current scoring version qualify. Offers must have verified cleanup. Rankings use exact saved scores before display rounding, equal scores share a rank, and ties display the earliest result first. Current-round standings remain separate from these rankings.
 
 ## How scoring works
 

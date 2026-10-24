@@ -41,13 +41,14 @@ function scoreReasonLabel(reason: string): string {
   };
   return labels[reason] ?? "Checking this side";
 }
-export function StandingsPanel({ data }: { data: RoundData }) {
+export function StandingsPanel({ data, onLeaderboard }: { data: RoundData; onLeaderboard: () => void }) {
   return <section className="panel standings-panel">
     <div className="panel-heading"><div><span className="panel-kicker">STANDINGS</span><h2>{data.round ? "Current round" : "Next challenge"}</h2></div><span className="standings-count">{data.health === "current" ? data.makers.length : "—"} <small>MAKERS</small></span></div>
     {data.makers.length === 0 ? <div className="standings-empty"><span className="standings-mark"><i /><i /><b /></span><h3>{data.health === "checking" ? "Loading standings" : data.health === "unavailable" ? "Standings unavailable" : data.round ? "Waiting for players" : "No active round"}</h3></div> : <>
       {data.makers.length === 1 && <p className="solo-notice">{data.makers[0]?.participantId === data.participant?.id ? "You’re the only maker this round" : "One maker this round"}</p>}
-      <ol className="maker-list">{data.makers.map((maker, index) => <li key={maker.participantId}><span>{maker.participantId === data.participant?.id ? "You" : `Maker ${index + 1}`}</span><strong>{maker.score}<small> PTS</small></strong></li>)}</ol>
+      <ol className="maker-list">{data.makers.map((maker, index) => <li key={maker.participantId}><span>{maker.participantId === data.participant?.id ? "You" : maker.makerId ? `Maker ${maker.makerId.slice(0,8).toUpperCase()}` : `Maker ${index + 1}`}</span><strong>{maker.score}<small> PTS</small></strong></li>)}</ol>
     </>}
+    <button className="text-button standings-leaderboard" onClick={onLeaderboard}>Leaderboard</button>
     <div className="standings-foot"><span>ROUND STATUS</span><span className="round-state-label">{data.health === "current" ? data.round?.status.replaceAll("_", " ") ?? "NOT SCHEDULED" : "CHECKING"}</span></div>
   </section>;
 }

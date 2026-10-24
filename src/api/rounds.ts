@@ -6,7 +6,7 @@ export interface RoundReport {
   serverTime: number;
   round: RoundSnapshot;
   participants: Array<{
-    participantId: string; score: string; totalScaled: string; verifiedSeconds: string;
+    participantId: string; makerId?: string; score: string; totalScaled: string; verifiedSeconds: string;
     unscoredSeconds: string; bidSeconds: number; askSeconds: number; twoSidedSeconds: number; pausedSeconds: number; cleanupState: string; finalizedAt: number;
   }>;
   orders: Array<{

@@ -19,6 +19,7 @@ import { baseAsset, isMarketSymbol, type MarketOption } from "../../shared/marke
 import { MarketTrend } from "./MarketTrend";
 import { MarketActivity } from "./MarketActivity";
 import { HeroHeading } from "./HeroHeading";
+import { Leaderboard } from "./Leaderboard";
 import { readConnectedWalletAddress } from "../api/walletProvider";
 import { useWalletConnection, type WalletConnectorBridge } from "../wallet/WalletConnectionProvider";
 
@@ -263,12 +264,13 @@ export function App() {
   const handledCompletedRoundId = useRef<string | null>(null);
   useEffect(() => { roundDataRef.current = roundData; }, [roundData]);
   useEffect(() => {
+    if (pathname === "/leaderboard") return;
     const completedRoundId = roundData.completedRoundId;
     if (!completedRoundId || completedRoundId === handledCompletedRoundId.current
       || !/^[0-9a-f-]{36}$/i.test(completedRoundId)) return;
     handledCompletedRoundId.current = completedRoundId;
     if (completedRoundId !== resultsRoundId) navigate(`/results/${completedRoundId}`);
-  }, [navigate, resultsRoundId, roundData.completedRoundId]);
+  }, [navigate, pathname, resultsRoundId, roundData.completedRoundId]);
   useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [tab, setTab] = useState<Tab>("quotes");
@@ -779,8 +781,9 @@ export function App() {
         </button>
       </header>
 
+      <nav className="site-navigation" aria-label="Main navigation"><a href="/arena" aria-current={pathname === "/arena" ? "page" : undefined} onClick={event => {if(!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey){event.preventDefault();navigate("/arena?mode=spectate");}}}>Arena</a><a href="/leaderboard" aria-current={pathname === "/leaderboard" ? "page" : undefined} onClick={event => {if(!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey){event.preventDefault();navigate("/leaderboard");}}}>Leaderboard</a></nav>
       <main id="top" className={`page-content${showMobileDock ? " page-content--has-dock" : ""}`}>
-        {resultsRoundId ? <Results roundId={resultsRoundId} onBack={() => navigate("/")} onRules={() => setDialog("rules")}
+        {pathname === "/leaderboard" ? <Leaderboard navigate={navigate} /> : resultsRoundId ? <Results roundId={resultsRoundId} onBack={() => navigate("/")} onRules={() => setDialog("rules")}
           myOrders={roundData.participant?.roundId === resultsRoundId ? roundData.orders : []}
           canCancel={liveAccount} cancelingOrderIds={cancelingOrderIds}
           onCancel={clientOrderId => { const order = roundData.orders.find(item => item.client_order_id === clientOrderId); if (order) void cancelObservedOrder(order); }} /> : <>
@@ -879,7 +882,7 @@ export function App() {
 
           <aside className={`right-column ${tab !== "standings" ? "mobile-hidden" : ""}`}>
             <ScorePanel data={roundData} now={serverNow} />
-            <StandingsPanel data={roundData} />
+            <StandingsPanel data={roundData} onLeaderboard={() => navigate("/leaderboard")} />
             <MarketActivity symbol={symbol} />
           </aside>
         </div>

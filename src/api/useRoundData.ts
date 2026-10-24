@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RoundSnapshot } from "./rounds";
-export interface MakerStanding { participantId: string; score: string; asOf: number | null }
+export interface MakerStanding { participantId: string; makerId?: string; score: string; asOf: number | null }
 export interface ParticipantSnapshot {
   id: string; roundId: string; verificationState: string; roundStatus: string;
   startsAt: number; endsAt: number; score: string | null;

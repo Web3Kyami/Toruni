@@ -1,3 +1,4 @@
+import { publicMakerId } from "./makerIdentity.ts";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { formatScore } from "../shared/scoring.ts";
 
@@ -81,9 +82,9 @@ export async function readRoundReport(roundId: string) {
   const rounds = await query<RoundRow>(`${roundSelect} WHERE r.id = $1`, [roundId]);
   if (!rounds[0]) return null;
   const participants = await query<{
-    participant_id: string; total_scaled: string; verified_seconds: string;
+    participant_id: string; account_id: string; total_scaled: string; verified_seconds: string;
     unscored_seconds: string; bid_eligible_seconds: number; ask_eligible_seconds: number; two_sided_seconds: number; paused_seconds: number; cleanup_state: string; finalized_at: Date;
-  }>(`SELECT rr.participant_id, rr.total_scaled::text, rr.verified_seconds::text,
+  }>(`SELECT rr.participant_id,p.account_id, rr.total_scaled::text, rr.verified_seconds::text,
     rr.unscored_seconds::text, rr.bid_eligible_seconds, rr.ask_eligible_seconds, rr.two_sided_seconds, rr.paused_seconds, rr.cleanup_state, rr.finalized_at
     FROM round_results rr JOIN participants p ON p.id = rr.participant_id AND p.round_id = rr.round_id
     WHERE rr.round_id = $1 AND p.verification_state = 'verified' ORDER BY rr.total_scaled DESC`, [roundId]);
@@ -96,7 +97,7 @@ export async function readRoundReport(roundId: string) {
   return {
     serverTime: Date.now(), round: roundView(rounds[0]),
     participants: participants.map(row => ({
-      participantId: row.participant_id, score: formatScore(BigInt(row.total_scaled)),
+      participantId: row.participant_id, makerId: publicMakerId(row.account_id), score: formatScore(BigInt(row.total_scaled)),
       totalScaled: row.total_scaled, verifiedSeconds: row.verified_seconds,
       unscoredSeconds: row.unscored_seconds, bidSeconds: row.bid_eligible_seconds, askSeconds: row.ask_eligible_seconds,
       twoSidedSeconds: row.two_sided_seconds, pausedSeconds: row.paused_seconds, cleanupState: row.cleanup_state,
@@ -144,11 +145,11 @@ export async function acquireScoringLeader(): Promise<{ held: () => boolean; rel
 }
 
 export async function readLeaderboard(roundId: string) {
-  const rows = await query<{ id: string; total_scaled: string; sampled_at: Date | null }>(`SELECT p.id,
+  const rows = await query<{ id: string; account_id: string; total_scaled: string; sampled_at: Date | null }>(`SELECT p.id,p.account_id,
     coalesce(sum(s.delta_scaled),0)::text AS total_scaled,max(s.sampled_at) AS sampled_at
     FROM participants p LEFT JOIN score_samples s ON s.participant_id=p.id AND s.round_id=p.round_id
     WHERE p.round_id=$1 AND p.verification_state='verified' GROUP BY p.id ORDER BY sum(s.delta_scaled) DESC NULLS LAST`, [roundId]);
-  return { serverTime: Date.now(), makers: rows.map(row => ({ participantId: row.id,
+  return { serverTime: Date.now(), makers: rows.map(row => ({ participantId: row.id, makerId: publicMakerId(row.account_id),
     score: formatScore(BigInt(row.total_scaled)), asOf: row.sampled_at?.getTime() ?? null })) };
 }
 

@@ -40,7 +40,7 @@ export function Results({ roundId, onBack, onRules, myOrders = [], canCancel = f
       <div className="feed-banner" role="status"><span>{report.round.symbol} · {report.round.status.replaceAll("_", " ")}</span><span className="feed-banner-time">{new Date(report.round.endsAt).toLocaleString()}</span></div>
       {report.participants.length === 0 ? <div className="panel results-empty"><h2>No scores yet</h2><button className="button button--ghost" onClick={() => void refresh()}>Refresh</button></div> : <div className="results-summary">
         {report.participants.map((participant, index) => <article className="panel result-score" key={participant.participantId}>
-          <span className="panel-kicker">{report.participants.length === 1 ? "SOLO ROUND" : `MAKER ${index + 1}`}</span>
+          <span className="panel-kicker">{participant.makerId ? `MAKER ${participant.makerId.slice(0,8).toUpperCase()}` : report.participants.length === 1 ? "SOLO ROUND" : `MAKER ${index + 1}`}</span>
           <h2>{participant.score}<small> POINTS</small></h2>
           <dl><div><dt>Time earning points</dt><dd>{participant.verifiedSeconds}s</dd></div><div><dt>Buy offer points</dt><dd>{participant.bidSeconds}s</dd></div><div><dt>Sell offer points</dt><dd>{participant.askSeconds}s</dd></div><div><dt>Two-sided points</dt><dd>{participant.twoSidedSeconds}s</dd></div><div><dt>Offers</dt><dd>{participant.cleanupState === "verified" ? "Closed" : "Check open offers"}</dd></div></dl>
         </article>)}

@@ -1,3 +1,4 @@
+import { leaderboardFilters, readRankings } from "./leaderboard.ts";
 import { isMarketSymbol } from "../shared/markets.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -148,6 +149,7 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
         && Number(snapshot.mark.markPrice) <= Number(snapshot.marketRules.maximumPrice);
       sendJson(response, 200, publicGamePolicy(validPrice ? snapshot.marketRules : null)); return;
     }
+    if (url.pathname === "/api/leaderboard") { sendJson(response, 200, await readRankings(leaderboardFilters(url))); return; }
     if (url.pathname === "/api/markets") { sendJson(response, 200, { markets: await readMarketCatalog() }); return; }
     if (url.pathname === "/api/price-history") {
       const symbol = queryValue(url, "symbol") ?? "BTC-USD";
@@ -263,7 +265,7 @@ function allowSessionRequest(address: string): boolean {
 
 async function serveClient(pathname: string, response: ServerResponse): Promise<void> {
   const root = resolve(process.cwd(), "dist");
-  const isAppRoute = pathname === "/" || pathname === "/arena" || /^\/results\/[0-9a-f-]{36}$/i.test(pathname);
+  const isAppRoute = pathname === "/" || pathname === "/arena" || pathname === "/leaderboard" || /^\/results\/[0-9a-f-]{36}$/i.test(pathname);
   const isAsset = /^\/assets\/[A-Za-z0-9_.-]+\.(js|css|woff2|png|svg)$/.test(pathname);
   if (!isAppRoute && !isAsset) { sendJson(response, 404, { error: "Page not found." }); return; }
   const filename = resolve(root, isAppRoute ? "index.html" : pathname.slice(1));

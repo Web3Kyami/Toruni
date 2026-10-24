@@ -645,3 +645,60 @@ h1 em { font-style: normal; color: var(--lime); }
 /* Keep price and quantity columns distinct in the compact order book. */
 .book-side { grid-template-columns: minmax(24px,1fr) max-content max-content; column-gap: 10px; }
 .book-side strong { text-align: right; }
+
+/* Persistent rankings stay separate from the current-round standings. */
+.site-navigation { display:flex; justify-content:flex-end; gap:24px; max-width:1440px; margin:0 auto; padding:0 4%; border-bottom:1px solid var(--border-soft); }
+.site-navigation a { display:inline-flex; align-items:center; min-height:44px; color:var(--muted); text-decoration:none; font-size:14px; font-weight:600; border-bottom:2px solid transparent; }
+.site-navigation a:hover, .site-navigation a[aria-current="page"] { color:var(--lime); border-bottom-color:var(--lime); }
+.leaderboard-page { min-height:60vh; padding-bottom:24px; }
+.leaderboard-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:28px; }
+.leaderboard-heading h1 { margin:10px 0 0; font-size:clamp(28px,4vw,42px); line-height:1.1; }
+.leaderboard-panel { overflow:hidden; }
+.leaderboard-controls { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; padding:20px 24px; border-bottom:1px solid var(--border); }
+.leaderboard-period { display:inline-flex; padding:3px; border:1px solid var(--border); border-radius:8px; background:var(--surface-low); }
+.leaderboard-period button { min-height:44px; padding:8px 18px; border:0; border-radius:5px; background:transparent; color:var(--muted); font-size:14px; font-weight:600; cursor:pointer; }
+.leaderboard-period .is-active { background:var(--surface-raised); color:var(--lime); }
+.leaderboard-market { display:flex; align-items:center; gap:12px; font-size:14px; color:var(--muted); }
+.leaderboard-market select { min-height:44px; border:1px solid var(--control-border); border-radius:7px; padding:8px 12px; background:var(--surface-low); color:var(--text); font:500 16px var(--sans); }
+.leaderboard-table { width:100%; border-collapse:collapse; text-align:left; font-size:14px; }
+.leaderboard-table thead th { color:var(--muted); font-size:14px; font-weight:500; padding:18px 24px; }
+.leaderboard-table td,.leaderboard-table tbody th { padding:20px 24px; border-top:1px solid var(--border-soft); font-weight:500; vertical-align:middle; }
+.leaderboard-table tbody tr:hover { background:rgba(112,182,232,.035); }
+.leaderboard-rank { display:inline-flex; align-items:center; gap:8px; color:var(--muted); font-family:var(--mono); }
+.leaderboard-leader .leaderboard-rank { color:var(--lime); }
+.leaderboard-maker { display:block; font-size:16px; font-weight:600; white-space:nowrap; }
+.leaderboard-symbol { display:block; margin-top:6px; color:var(--muted); font-size:14px; }
+.leaderboard-table .number-cell { text-align:right; font-variant-numeric:tabular-nums; }
+.leaderboard-score { color:var(--lime); font:600 20px var(--mono); }
+.leaderboard-points { display:block; color:var(--muted); font-size:14px; margin-top:4px; }
+.leaderboard-result { display:inline-flex; justify-content:center; align-items:center; gap:6px; min-height:44px; min-width:44px; color:var(--cyan); font-size:14px; text-decoration:none; white-space:nowrap; }
+.leaderboard-result:hover { color:var(--text); }
+.leaderboard-empty { min-height:260px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; padding:32px 20px; color:var(--muted); }
+.leaderboard-empty > svg { color:var(--lime); }
+.leaderboard-empty h2 { font-size:18px; margin:0; color:var(--text); }
+.leaderboard-loading { padding:10px 24px; }
+.leaderboard-loading div { height:80px; border-bottom:1px solid var(--border-soft); background:linear-gradient(90deg,transparent,var(--surface-raised),transparent); background-size:200% 100%; animation:leaderboard-loading 1.5s ease-in-out infinite; }
+.leaderboard-pagination { display:flex; justify-content:flex-end; align-items:center; gap:18px; padding:18px 24px; border-top:1px solid var(--border); font-size:14px; color:var(--muted); }
+.standings-leaderboard { margin-top:16px; }
+@keyframes leaderboard-loading { to { background-position:-200% 0; } }
+@media(max-width:767px) {
+  .site-navigation { justify-content:flex-start; padding:0 15px; gap:24px; }
+  .leaderboard-heading { margin-bottom:20px; align-items:flex-end; }
+  .leaderboard-heading .button { font-size:14px; padding:8px 12px; gap:6px; }
+  .leaderboard-controls { padding:14px; gap:12px; }
+  .leaderboard-period { flex:1; }
+  .leaderboard-period button { flex:1; padding:8px 10px; }
+  .leaderboard-market { flex-basis:100%; justify-content:space-between; }
+  .leaderboard-market select { flex:1; max-width:220px; }
+  .leaderboard-extra { display:none; }
+  .leaderboard-table thead th { padding:14px 8px; }
+  .leaderboard-table td,.leaderboard-table tbody th { padding:16px 8px; }
+  .leaderboard-rank { gap:4px; }
+  .leaderboard-rank svg { display:none; }
+  .leaderboard-maker { font-size:14px; }
+  .leaderboard-score { font-size:18px; }
+  .leaderboard-result span { display:none; }
+  .leaderboard-pagination { gap:10px; padding:14px 10px; justify-content:space-between; }
+  .leaderboard-pagination .button { font-size:14px; padding:8px; gap:5px; }
+}
+@media(prefers-reduced-motion:reduce) { .leaderboard-loading div { animation:none; } }
