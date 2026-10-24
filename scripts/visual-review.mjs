@@ -78,12 +78,12 @@ export async function runVisualReview(port) {
         };
         await capture(label);
         if (route === '/') {
-          const reviewRect = await evaluate(`(() => {const button=[...document.querySelectorAll('.quote-button')].find(b => b.textContent.includes('Review bid'));if(!button)return null;button.scrollIntoView({block:'center',behavior:'instant'});const r=button.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
-          if (!reviewRect) throw new Error('Missing bid review action');
-          await call('Input.dispatchMouseEvent', {type:'mousePressed',...reviewRect,button:'left',clickCount:1});
-          await call('Input.dispatchMouseEvent', {type:'mouseReleased',...reviewRect,button:'left',clickCount:1});
-          const blocker = await evaluate('document.querySelector(".quote-notice")?.innerText?.trim()');
-          if (!blocker) throw new Error('A blocked offer review did not explain the next step after click');
+          const blocker = await evaluate(`(() => {
+            const button = [...document.querySelectorAll('.quote-button')].find(item => item.textContent.includes('Review bid'));
+            const reason = document.querySelector('#quote-disabled-bid');
+            return button && reason && button.disabled && button.getAttribute('aria-describedby') === reason.id ? reason.innerText.trim() : '';
+          })()`);
+          if (!blocker) throw new Error('A disabled offer review is missing its visible explanation');
           evidence.push({screen:'blocked-offer-review',width,blocker});
         }
         evidence.push({ route, width, viewport, horizontalOverflow: await evaluate('document.documentElement.scrollWidth > innerWidth'),
@@ -102,10 +102,10 @@ export async function runVisualReview(port) {
         }
         if (route === '/') {
           for (const [name, expression] of [
-            ['how', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("How it works"))?.click()'],
-            ['rules', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Scoring rules"))?.click()'],
+            ['how', '[...document.querySelectorAll("button")].find(b => /How it works|How to play/.test(b.textContent) && b.getClientRects().length)?.click()'],
+            ['rules', '[...document.querySelectorAll("button")].find(b => /Scoring rules|Rules & scoring/.test(b.textContent) && b.getClientRects().length)?.click()'],
             ['risk', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Margin and positions"))?.click()'],
-            ['join', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Join challenge"))?.click()'],
+            ['join', '[...document.querySelectorAll("button")].find(b => /Start challenge|Join challenge/.test(b.textContent) && b.getClientRects().length)?.click()'],
             ['wallet', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Connect wallet"))?.click()'],
             ['orders', '[...document.querySelectorAll("button")].find(b => b.textContent.includes("Open order details"))?.click()'],
           ]) {

@@ -157,8 +157,11 @@ export async function readParticipantSnapshot(sessionHash: string) {
     JOIN rounds r ON r.id=p.round_id WHERE p.session_hash=$1 ORDER BY p.joined_at DESC LIMIT 1`, [sessionHash]);
   const participant = rows[0];
   if (!participant) return { serverTime: Date.now(), participant: null, orders: [] };
-  const samples = await query<{ total: string; sampled_at: Date | null }>(`SELECT coalesce(sum(delta_scaled),0)::text AS total,max(sampled_at) AS sampled_at
-    FROM score_samples WHERE participant_id=$1 AND round_id=$2`, [participant.id, participant.round_id]);
+  const samples = await query<{ total: string; sampled_at: Date | null; side_reason: string | null }>(`SELECT
+    coalesce(sum(s.delta_scaled),0)::text AS total,max(s.sampled_at) AS sampled_at,
+    (SELECT latest.reason FROM score_samples latest WHERE latest.participant_id=$1 AND latest.round_id=$2
+      ORDER BY latest.sampled_at DESC LIMIT 1) AS side_reason
+    FROM score_samples s WHERE s.participant_id=$1 AND s.round_id=$2`, [participant.id, participant.round_id]);
   const orders = await query(`SELECT qi.client_order_id,qi.side,qi.status AS intent_status,qi.verification_error,
     qi.last_checked_at,qi.first_open_observed_at,oo.exchange_order_id,oo.exchange_status,oo.price::text,
     oo.original_qty::text,oo.filled_qty::text,oo.observed_at FROM quote_intents qi LEFT JOIN LATERAL
@@ -168,5 +171,18 @@ export async function readParticipantSnapshot(sessionHash: string) {
     verificationState: participant.verification_state, roundStatus: participant.round_status,
     startsAt: (participant.starts_at as Date).getTime(), endsAt: (participant.ends_at as Date).getTime(),
     score: participant.verification_state === 'verified' ? formatScore(BigInt(samples[0]?.total ?? "0")) : null,
+    sideReasons: parseScoreSideReasons(samples[0]?.side_reason ?? null),
     asOf: samples[0]?.sampled_at?.getTime() ?? null }, orders };
+}
+
+function parseScoreSideReasons(value: string | null): { bid: string; ask: string } | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object") return null;
+    const reasons = parsed as Record<string, unknown>;
+    return typeof reasons.bid === "string" && typeof reasons.ask === "string"
+      ? { bid: reasons.bid, ask: reasons.ask }
+      : null;
+  } catch { return null; }
 }
