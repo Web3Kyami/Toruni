@@ -1,8 +1,8 @@
 # Toruni
 
-**A hands-on challenge for supplying two-sided liquidity.**
+**Keep both sides quoted. Compete on consistency.**
 
-Toruni helps traders practice market making with genuine orders on Strike Finance V2 testnet. In each 180-second BTC-USD round, players place a bid and an ask, then earn points only while the server independently verifies those quotes as open and competitive. Orders go to Strike’s testnet API. Toruni does not simulate trades.
+Toruni helps traders practice providing two-sided liquidity in BTC-USD on Strike Finance V2 testnet. In each 180-second round, players place real post-only bid and ask orders. Toruni’s server checks that the orders remain open and competitive, then scores eligible quote time. The market data and orders come from Strike testnet, not simulated trades.
 
 [Open the live arena](https://toruni.vercel.app/) · [Judge walkthrough](#for-judges) · [Developer setup](#for-developers)
 
@@ -60,26 +60,13 @@ Missing or stale evidence earns zero for that sample. Missed seconds are never b
 
 ```mermaid
 flowchart TD
-    subgraph Browser[Player browser]
-        Wallet[EVM wallet signs Builder Connect]
-        Client[Toruni client holds API wallet in tab memory]
-        Wallet --> Client
-    end
-
-    subgraph Vercel[Toruni API and scorer]
-        API[Session and HTTP API]
-        Worker[Round verifier and scorer]
-        DB[(PostgreSQL)]
-        API -->|Starts or recovers| Worker
-        Worker -->|Stores observations, samples, and results| DB
-        DB -->|Saved round data| API
-    end
-
-    Strike[Strike V2 testnet API]
-    Client -->|Offers and exact cancels| Strike
-    Client -->|Join, intent, and result requests| API
-    API -->|Independent reads| Strike
-    Worker -->|Market, risk, and order reads| Strike
+    Wallet[Player wallet signs Builder Connect] --> Client[Browser holds API wallet in tab memory]
+    Client -->|Player-approved offers and exact cancels| Strike[Strike V2 testnet]
+    Client -->|Round requests| API[Toruni API]
+    API --> Worker[Verifier checks market, account risk, and order status]
+    Worker -->|Independent reads| Strike
+    Worker -->|Observations, samples, and results| DB[(PostgreSQL)]
+    DB -->|Saved round data| API
 ```
 
 The browser keeps the Ed25519 API-wallet private key in tab memory. It sends user-approved offers and cancels for exact Toruni order IDs. The server never receives that key and never submits, cancels, or closes exchange orders. It reads Strike independently, verifies order state, and calculates the score.
