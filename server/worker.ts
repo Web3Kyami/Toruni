@@ -12,6 +12,14 @@ export interface RoundWorkerHandle {
   stop: () => Promise<void>;
 }
 
+function failureLabel(error: unknown): string {
+  if (!error || typeof error !== "object") return "unknown";
+  const value = error as { name?: unknown; code?: unknown };
+  const name = typeof value.name === "string" && /^[A-Za-z][A-Za-z0-9]{0,31}$/.test(value.name) ? value.name : "Error";
+  const code = typeof value.code === "string" && /^[A-Z0-9_-]{1,32}$/.test(value.code) ? value.code : null;
+  return code ? `${name}:${code}` : name;
+}
+
 /** One database-held leader; collectors and fixed-slot sampler never submit or cancel orders. */
 export function startRoundWorker(options: { roundId?: string } = {}): RoundWorkerHandle {
   let stopped = false;
@@ -27,6 +35,7 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
   let activeRoundId: string | null = null;
   let lastSampleSlot: number | null = null;
   let lastPublished = 0;
+  let lastDiagnosticAt = 0;
   let collectionRunning = false;
   let readySettled = false;
   let resolveReady!: (acquired: boolean) => void;
@@ -111,20 +120,28 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
           }
         })());
       }
-      await Promise.allSettled(jobs);
+      const results = await Promise.allSettled(jobs);
+      const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failure && Date.now() - lastDiagnosticAt >= 10_000) {
+        lastDiagnosticAt = Date.now();
+        process.stderr.write(`Toruni scoring collection paused (${failureLabel(failure.reason)}).\n`);
+      }
     } finally { collectionRunning = false; }
   };
 
   const cycle = async () => {
     if (stopped) return;
+    let stage = "leader";
     try {
       if (!leader?.held()) {
         if (leader) { await leader.release().catch(() => undefined); leader = null; }
         leader = await acquireScoringLeader();
         if (!leader) { markReady(false); return; }
         markReady(true);
+        stage = "restart reconciliation";
         await resetContinuity();
       }
+      stage = "round lookup";
       const rounds = options.roundId
         ? await query(`SELECT * FROM rounds WHERE id=$1 AND status IN ('lobby','active','settling','review_required') LIMIT 1`, [options.roundId])
         : await query(`SELECT * FROM rounds WHERE status IN ('lobby','active','settling','review_required') LIMIT 1`);
@@ -132,15 +149,24 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
       if (!round) { activeRoundId = null; return; }
       if (activeRoundId !== round.id) { activeRoundId = round.id as string; engineRules = null; lastSampleSlot = null; }
       const now = Date.now();
+      stage = "market and order collection";
       if (!collectionTask) {
         collectionTask = collect(round.id as string, now)
-          .catch(() => { /* Existing evidence ages out and pauses credit. */ })
+          .catch(error => {
+            if (Date.now() - lastDiagnosticAt >= 10_000) {
+              lastDiagnosticAt = Date.now();
+              process.stderr.write(`Toruni scoring collection stopped (${failureLabel(error)}).\n`);
+            }
+          })
           .finally(() => { collectionTask = null; });
       }
+      stage = "pending-order lookup";
       const pending = await query<{ count: string }>("SELECT count(*) FROM quote_intents WHERE round_id=$1 AND status<>'terminal'", [round.id]);
+      stage = "round transition";
       const next = advanceRound({ status: round.status as RoundStatus, startsAt: (round.starts_at as Date).getTime(),
         endsAt: (round.ends_at as Date).getTime(), settlementDeadline: (round.settlement_deadline as Date).getTime() }, now, pending[0]?.count === "0");
       if (round.status === "active" && now < (round.ends_at as Date).getTime() + 1000 && leader.held()) {
+        stage = "score sampling";
         const startsAt = (round.starts_at as Date).getTime();
         const sampledAt = Math.min((round.ends_at as Date).getTime(), startsAt + Math.floor((now - startsAt) / 1000) * 1000);
         if (sampledAt !== lastSampleSlot) {
@@ -153,14 +179,20 @@ export function startRoundWorker(options: { roundId?: string } = {}): RoundWorke
       }
       if (next.changed) await query("UPDATE rounds SET status=$1 WHERE id=$2", [next.status, round.id]);
       if (["completed", "review_required"].includes(next.status)) {
+        stage = "result finalization";
         await transaction(client => finalizeRoundResults(client, round.id as string, now));
       }
       if (now - lastPublished >= 1000 || next.changed) {
         lastPublished = now;
+        stage = "round publication";
         publishEvent("round", { ...await readCurrentRound(), completedRoundId: next.status === "completed" ? round.id : null });
       }
-    } catch {
+    } catch (error) {
       markReady(false);
+      if (Date.now() - lastDiagnosticAt >= 10_000) {
+        lastDiagnosticAt = Date.now();
+        process.stderr.write(`Toruni scoring cycle paused at ${stage} (${failureLabel(error)}).\n`);
+      }
       publishEvent("scoring-paused", { serverTime: Date.now(), reason: "Observations are being reconciled." });
     }
     finally {

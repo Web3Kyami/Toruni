@@ -24,6 +24,8 @@ function scheduleScoring(roundId: string): void {
   const task = runRoundWorkerForRound(roundId)
     .then(result => {
       if (result === "time-limit") process.stderr.write("Toruni scoring invocation reached its round runtime limit.\n");
+      else if (result === "another-leader") process.stderr.write("Toruni scoring invocation found another database leader.\n");
+      else if (result === "round-missing") process.stderr.write("Toruni scoring invocation found no runnable round.\n");
     })
     .catch(error => { process.stderr.write(`Toruni scoring invocation ended before the round was finalized (${scoringFailureCode(error)}).\n`); })
     .finally(() => { activeRuns.delete(roundId); });
