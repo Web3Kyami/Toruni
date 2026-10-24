@@ -1,41 +1,30 @@
 # Toruni
 
-**Keep both sides quoted. Compete on consistency.**
+Toruni is a 180-second market-making challenge for BTC-USD. Players practice providing liquidity by placing a bid and an ask, then earn points while their quotes stay open and competitive.
 
-Toruni helps traders practice providing two-sided liquidity in BTC-USD on Strike Finance V2 testnet. In each 180-second round, players place real post-only bid and ask orders. Toruni’s server checks that the orders remain open and competitive, then scores eligible quote time. The market data and orders come from Strike testnet, not simulated trades.
-
-[Open the live arena](https://toruni.vercel.app/) · [Judge walkthrough](#for-judges) · [Developer setup](#for-developers)
+[Open the arena](https://toruni.vercel.app/) · [How a round works](#a-round) · [Run locally](#run-locally)
 
 ![Toruni lobby with the live BTC-USD market, bid and ask controls, and round standings](docs/images/toruni-lobby.png)
 
-*The lobby shows live market data and a waiting-round state. Prices and round status change with Strike testnet activity.*
+*The lobby shows market data, the round state, and current standings.*
 
-## For judges
-
-### What to look for
-
-Open the [live arena](https://toruni.vercel.app/) to watch the BTC-USD mark, order book, and round state. You can explore the market without connecting a wallet.
-
-To take part, you need an Ethereum-compatible browser wallet and a Strike V2 testnet account with trading collateral already credited. A wallet’s faucet balance is not the same as collateral credited to a Strike account. Toruni checks the account and risk limits before allowing a round entry.
-
-### One round, from quote to result
+## A round
 
 ```mermaid
 flowchart TD
-    A[Watch the live BTC-USD market] --> B[Connect wallet and check Strike account]
+    A[Watch the BTC-USD market] --> B[Connect a wallet and check your account]
     B --> C[Join or start a 180-second round]
-    C --> D[Review and place a bid and an ask]
-    D --> E[Strike receives genuine post-only offers]
-    E --> F[Server independently verifies each order]
-    F --> G[Competitive eligible time earns points]
-    G --> H[After the round, cancel Toruni offers in the app]
-    H --> I[Server verifies final order states]
-    I --> J[Review the result and score history]
+    C --> D[Place a bid and an ask]
+    D --> E[Strike receives the orders]
+    E --> F[The server verifies their status]
+    F --> G[Eligible quote time earns points]
+    G --> H[Cancel Toruni orders after the round]
+    H --> I[Review the result and score history]
 ```
 
-The score comes from quotes that Strike reports as open and the server continues to verify. An accepted order request alone is not enough. After 180 seconds, offers remain open until the player cancels them. A filled offer can leave a position behind; canceling an offer does not close that position.
+A quote earns points only after the server confirms that the exact order is open and competitive. Requests that Strike accepts are not enough by themselves. Missing or stale market, account, or order evidence earns zero for that sample.
 
-### How the score works
+## How scoring works
 
 Each eligible side receives a quality from `0` to `1`. Quality is highest at the market mark and falls linearly to zero 50 basis points away. If `B` is bid quality and `A` is ask quality, the scoring rate is:
 
@@ -43,22 +32,17 @@ Each eligible side receives a quality from `0` to `1`. Quality is highest at the
 points per minute = 25 × B + 25 × A + 50 × min(B, A)
 ```
 
-The two-sided bonus uses the weaker quote, so competitive bids and asks both matter. A single eligible side can earn its side points, but not the two-sided bonus.
+A competitive quote can earn its side points. Keeping both the bid and ask competitive also earns a two-sided bonus based on the weaker quote. A quote must remain eligible through a five-second observed dwell period. Missed seconds are not backfilled. The results show saved order states and the score history.
 
-A quote earns points only while all of these conditions hold:
+## Orders and account requirements
 
-- Strike independently reports the exact Toruni order as open for the player’s account, market, and side.
-- The order is a post-only limit offer and remains open until canceled.
-- The offer stays eligible through a five-second observed dwell period.
-- Market, order, and account-risk evidence is fresh, and the remaining offer value meets Strike’s current market minimum.
+Toruni sends post-only limit orders to Strike Finance V2 testnet. To enter a round, connect an Ethereum-compatible wallet and use a Strike V2 testnet account with trading collateral already credited. Faucet tokens in a wallet are not the same as collateral credited to a Strike account.
 
-Missing or stale evidence earns zero for that sample. Missed seconds are never backfilled. The results page shows the saved order states and per-second score history.
+Offers stay open until you cancel them, including after a round ends. You can cancel Toruni offers from the app without affecting other account orders. If an offer fills, canceling it does not close the resulting position.
 
-## For developers
+## How orders and scores are handled
 
-### Trust and data flow
-
-#### Order authorization
+### Order authorization
 
 ```mermaid
 flowchart TD
@@ -66,7 +50,7 @@ flowchart TD
     Browser -->|Orders and cancels| Strike[Strike testnet]
 ```
 
-#### Independent scoring
+### Independent scoring
 
 ```mermaid
 flowchart TD
@@ -77,17 +61,11 @@ flowchart TD
     Save --> DB[(PostgreSQL)]
 ```
 
-The browser keeps the Ed25519 API-wallet private key in tab memory. It sends user-approved offers and cancels for exact Toruni order IDs. The server never receives that key and never submits, cancels, or closes exchange orders. It reads Strike independently, verifies order state, and calculates the score.
+The wallet signs Builder Connect to register an Ed25519 API wallet. The browser keeps its private key in tab memory and sends user-approved orders and exact Toruni-order cancellations to Strike. The server never receives the key or submits, cancels, or closes exchange orders.
 
-Authenticated exchange requests are pinned to `https://api-v2-testnet.strikefinance.org`. Mainnet is not a configurable target.
+The verifier reads market, account-risk, and order state independently from Strike. Authenticated exchange requests are pinned to `https://api-v2-testnet.strikefinance.org`. Mainnet is not a configurable target.
 
-### Scoring runtime
-
-Vercel starts a bounded background scorer after a successful round join. A current-round request can restart it if its database heartbeat is stale. PostgreSQL elects one scoring leader, and the scorer samples through the round and its settlement window. The worker is continuous during a round, not between rounds. A persistent Node host can run the same worker continuously.
-
-The Vercel functions are configured for up to 300 seconds, which covers the 180-second round and settlement window. On Vercel, the client reads persisted results through the HTTP API. The standalone Node service also supports a persistent event stream.
-
-### Run locally
+## Run locally
 
 Use Node.js 22.18 or newer and npm.
 
@@ -106,14 +84,14 @@ Set these values in `.env.local`:
 - `TORUNI_MAX_QUOTE_NOTIONAL`: maximum value for one resting quote, in USD.
 - `TORUNI_MAX_ACCOUNT_EXPOSURE`: maximum gross exposure for positions and Toruni quotes, in USD. It must cover two maximum quotes.
 
-Keep database URLs server-only. Do not prefix them with `VITE_`, which would expose them to the browser. Risk limits must be explicitly configured before a round accepts participants.
+Keep database URLs server-only. Do not prefix them with `VITE_`, which would expose them to the browser. Risk limits must be configured before a round accepts participants.
 
 ```sh
 npm run migrate
 npm run dev
 ```
 
-Vite serves the interface and API together. Refreshing or closing the tab loses its in-memory API wallet.
+Vite serves the interface and API together. Refreshing or closing the tab loses the in-memory API wallet.
 
 To build and run the standalone Node service:
 
@@ -124,11 +102,13 @@ npm run start:server
 
 It serves `dist/` and the API on port 4174 by default. Set `APP_ORIGIN` to the browser URL and run migrations before starting a new schema version.
 
-### Deployment
+## Deployment
 
 The public app is [toruni.vercel.app](https://toruni.vercel.app/). Vercel builds with `npm run build`, serves `dist/`, and routes requests through the handlers in `api/`. A separate deployment needs its own server-only database connections for persisted rounds and scoring. The direct connection keeps the PostgreSQL leader lock on one session. Session cookies trust Vercel’s deployment URL unless `APP_ORIGIN` is set for a custom domain. See [`vercel.json`](vercel.json) for build settings, function limits, and client-side routes.
 
-### Code map
+On Vercel, a successful round join starts a bounded scorer job. A request can restart it if the saved heartbeat is stale. PostgreSQL elects one scoring leader, and the scorer samples through the round and settlement window. The worker runs during a round, not between rounds. The standalone Node service can keep a worker running continuously and supports a persistent event stream.
+
+## Project map
 
 - `src/`: interface, wallet connection, Builder Connect, and browser-side Strike order requests.
 - `server/`: sessions, HTTP API, independent Strike reads, round lifecycle, verification, and scoring.
@@ -137,7 +117,7 @@ The public app is [toruni.vercel.app](https://toruni.vercel.app/). Vercel builds
 - `api/`: Vercel HTTP entry points.
 - `tests/`: scoring, validation, lifecycle, API, and worker checks.
 
-### Checks
+## Checks
 
 ```sh
 npm run typecheck
@@ -145,7 +125,7 @@ npm test
 npm run build
 ```
 
-The automated tests use isolated test data and do not submit trades. A passing test suite or local build does not replace a genuine Strike testnet round.
+Automated tests use isolated test data and do not submit trades. Passing tests or a local build does not replace a genuine Strike testnet round.
 
 ## Attribution and license
 
